@@ -4,12 +4,17 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! Parsing and validation of Scarab's TOML configuration.
+//! Parsing and validation of Scarab's TOML configuration, and probing of
+//! source files with ffprobe.
 //!
-//! [`parse`] is the entry point. It deserializes TOML text into the
-//! validated [`LibraryBuildSpec`] model or reports the first problem it finds. Ambiguity,
-//! such as a rule applied twice, is rejected instead of being decided by
-//! declaration order.
+//! [`parse`] deserializes TOML text into the validated [`LibraryBuildSpec`]
+//! model or reports the first problem it finds. Ambiguity, such as a rule
+//! applied twice, is rejected instead of being decided by declaration order.
+//! [`probe_track`] describes one supplied source file by invoking ffprobe.
+
+mod probe;
+
+pub use probe::{ProbeError, ProbedTrack, probe_track};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
