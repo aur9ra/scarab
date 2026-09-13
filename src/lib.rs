@@ -4,16 +4,20 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! Parsing and validation of Scarab's TOML configuration, and probing of
-//! source files with ffprobe.
+//! Parsing and validation of Scarab's TOML configuration, discovery of
+//! source files under a source root, and probing of source files with ffprobe.
 //!
 //! [`parse`] deserializes TOML text into the validated [`LibraryBuildSpec`]
 //! model or reports the first problem it finds. Ambiguity, such as a rule
 //! applied twice, is rejected instead of being decided by declaration order.
-//! [`probe_track`] describes one supplied source file by invoking ffprobe.
+//! [`discover_source_files`] recursively collects every ordinary file under
+//! one source root. [`probe_track`] describes one supplied source file by
+//! invoking ffprobe.
 
+mod discovery;
 mod probe;
 
+pub use discovery::{DiscoveryError, discover_source_files};
 pub use probe::{ProbeError, ProbedTrack, probe_track};
 
 use std::collections::{BTreeMap, BTreeSet};
