@@ -5,20 +5,29 @@
  */
 
 //! Parsing and validation of Scarab's TOML configuration, discovery of
-//! source files under a source root, and probing of source files with ffprobe.
+//! source files under a source root, recognition of source-audio candidates
+//! among source files, and probing of source audio files with ffprobe.
 //!
 //! [`parse`] deserializes TOML text into the validated [`LibraryBuildSpec`]
 //! model or reports the first problem it finds. Ambiguity, such as a rule
 //! applied twice, is rejected instead of being decided by declaration order.
+//!
 //! [`discover_source_files`] recursively collects every ordinary file under
-//! one source root. [`probe_track`] describes one supplied source file by
+//! one source root. [`classify_source_audio`] recognizes whether
+//! one supplied pathname names a supported source-audio format by its final
+//! extension. [`probe_track`] describes one supplied source file by
 //! invoking ffprobe.
+//!
+//! Discovery, file candidate recognition, and probing as one pipeline is still
+//! future work.
 
 mod discovery;
 mod probe;
+mod source_audio;
 
 pub use discovery::{DiscoveryError, discover_source_files};
 pub use probe::{ProbeError, ProbedTrack, probe_track};
+pub use source_audio::{SourceAudioFormat, classify_source_audio};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
