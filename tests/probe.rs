@@ -5,22 +5,22 @@
  */
 
 //! Real ffprobe integration tests over the provided CC0 FLAC sample fixtures.
+//!
+//! Every probed path lives under a disposable copy of the committed fixture
+//! library, so ffprobe is never given a committed fixture path during testing.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
-use scarab::{ProbeError, probe_track};
+use scarab::{ProbeError, ProbedTrack, probe_track};
 
 mod common;
 
-use common::SourceFileSnapshot;
+use common::{SourceFileSnapshot, TempSandbox, copy_fixture_library};
 
-/// Library fixture root, relative to the crate root that cargo test runs in.
-const LIBRARY: &str = "tests/fixtures/library";
-
-/// One fixture row is: the path relative to `LIBRARY`, the exact duration
-/// ffprobe reports, and the tag map ffprobe reports.
+/// One fixture row is: the path relative to the committed fixture library,
+/// the exact duration ffprobe reports, and the tag map ffprobe reports.
 type FixtureRow = (
     &'static str,
     Duration,
@@ -93,56 +93,88 @@ fn tag_map(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// Captures the source file, then returns the probe result unchanged so
-/// callers can assert source immutability before inspecting the result.
-fn probe(relative: &str) -> (SourceFileSnapshot, Result<scarab::ProbedTrack, ProbeError>) {
-    let snapshot = SourceFileSnapshot::capture(relative);
-    let result = probe_track(Path::new(relative));
-    (snapshot, result)
+/// Captures the source file, probes it, asserts the captured source is
+/// unchanged, then returns the probe result unchanged so callers inspect the
+/// result only after the immutability check has completed.
+fn probe_track_checked(path: &Path) -> Result<ProbedTrack, ProbeError> {
+    let snapshot = SourceFileSnapshot::capture(path);
+    let result = probe_track(path);
+    snapshot.assert_unchanged();
+    result
 }
 
 #[test]
 fn probes_every_committed_fixture() {
-    for (file, expected_duration, expected_tags) in FIXTURES {
-        let relative = format!("{LIBRARY}/{file}");
-        let (snapshot, result) = probe(&relative);
+    let sandbox = TempSandbox::new();
+    let library = sandbox.path().join("library");
+    copy_fixture_library(&library);
 
-        snapshot.assert_unchanged();
+    for (file_path, expected_duration, expected_tags) in FIXTURES {
+        let copied = library.join(file_path);
 
-        let probed = result.unwrap_or_else(|error| panic!("probing {relative} failed: {error}"));
+        let probed = probe_track_checked(&copied)
+            .unwrap_or_else(|error| panic!("probing {} failed: {error}", copied.display()));
 
-        assert_eq!(probed.path, snapshot.path());
-        assert_eq!(probed.duration, Some(*expected_duration), "{relative}");
-        assert_eq!(probed.tags, tag_map(expected_tags), "{relative}");
+        assert_eq!(probed.path, copied);
+        assert_eq!(probed.duration, Some(*expected_duration), "{file_path}");
+        assert_eq!(probed.tags, tag_map(expected_tags), "{file_path}");
     }
 }
 
 #[test]
 fn preserves_exact_path() {
-    let relative = "tests/fixtures/library/album-two/02-22sq.flac";
-    let (snapshot, result) = probe(relative);
+    let sandbox = TempSandbox::new();
+    let library = sandbox.path().join("library");
+    copy_fixture_library(&library);
+    let copied = library.join("album-two/02-22sq.flac");
 
-    snapshot.assert_unchanged();
+    // Derive a relative spelling from the test process CWD to the disposable
+    // copy. Incompatible Windows prefixes or volumes cannot have this
+    // relation, the redundant `.` spelling below still checks
+    // disposable lexical preservation there.
+    let relative = relative_spelling(&copied);
+    #[cfg(unix)]
+    assert!(
+        relative.is_some(),
+        "a relative spelling to {} must exist on Unix",
+        copied.display()
+    );
 
-    let probed = result.unwrap_or_else(|error| panic!("probing {relative} failed: {error}"));
-    assert_eq!(probed.path, PathBuf::from(relative));
-    assert!(probed.path.is_relative());
+    if let Some(relative) = &relative {
+        let probed = probe_track_checked(relative)
+            .unwrap_or_else(|error| panic!("probing {} failed: {error}", relative.display()));
+        // Raw OS-string comparison: path equality is component-normalized,
+        // so it would not distinguish a preserved spelling from a rewritten one.
+        assert_eq!(probed.path.as_os_str(), relative.as_os_str());
+        assert!(probed.path.is_relative());
+    }
 
     // a redundant path component must also survive untouched
-    let redundant = "tests/fixtures/library/./album-two/02-22sq.flac";
-    let (snapshot, result) = probe(redundant);
+    let base = relative.unwrap_or(copied);
+    let redundant = redundant_dot_spelling(&base);
 
-    snapshot.assert_unchanged();
-
-    let probed = result.unwrap_or_else(|error| panic!("probing {redundant} failed: {error}"));
-    assert_eq!(probed.path, PathBuf::from(redundant));
+    let probed = probe_track_checked(&redundant)
+        .unwrap_or_else(|error| panic!("probing {} failed: {error}", redundant.display()));
+    // Raw OS-string comparison: path equality is component-normalized, so the
+    // redundant `./` component must be checked as spelled.
+    assert_eq!(probed.path.as_os_str(), redundant.as_os_str());
 }
 
 #[test]
 fn nonexistent_path_reports_failed_probe_process() {
-    let missing = "tests/fixtures/library/no-such-file.flac";
+    let sandbox = TempSandbox::new();
+    let library = sandbox.path().join("library");
+    copy_fixture_library(&library);
+    let missing = library.join("no-such-file.flac");
+    assert!(
+        !missing.exists(),
+        "the copied root must not contain {}",
+        missing.display()
+    );
 
-    match probe_track(Path::new(missing)) {
+    // A nonexistent source has nothing to snapshot, so probe_track is
+    // invoked directly without the checked wrapper.
+    match probe_track(&missing) {
         Err(ProbeError::Exit { status, stderr }) => {
             assert!(!status.success());
             assert!(
@@ -153,4 +185,64 @@ fn nonexistent_path_reports_failed_probe_process() {
         Err(other) => panic!("expected non-success exit, got: {other}"),
         Ok(probed) => panic!("expected probe failure, got: {probed:?}"),
     }
+}
+
+/// Returns `path` spelled relative to the test process CWD when possible.
+///
+/// A relative spelling always exists on Unix: the CWD is absolute and either
+/// `path` is already relative, or it shares some root component(s) with the
+/// CWD. `None` only occurs when an absolute `path` has a different prefix or
+/// volume than the CWD, which is possible on Windows.
+fn relative_spelling(path: &Path) -> Option<PathBuf> {
+    if path.is_absolute() {
+        let cwd = std::env::current_dir().expect("test process working directory");
+        relative_from(&cwd, path)
+    } else {
+        // The path is already relative to the CWD.
+        Some(path.to_path_buf())
+    }
+}
+
+/// Derives a relative path from `from` to `to`. Returns `None` when
+/// the paths share no leading component, such as Windows paths on different
+/// volumes, where no relative spelling exists.
+fn relative_from(from: &Path, to: &Path) -> Option<PathBuf> {
+    let from_components: Vec<Component<'_>> = from.components().collect();
+    let to_components: Vec<Component<'_>> = to.components().collect();
+    let common = from_components
+        .iter()
+        .zip(&to_components)
+        .take_while(|(from, to)| from == to)
+        .count();
+
+    if common == 0 {
+        return None;
+    }
+
+    let mut relative = PathBuf::new();
+    for _ in common..from_components.len() {
+        relative.push("..");
+    }
+    for component in &to_components[common..] {
+        relative.push(component.as_os_str());
+    }
+    if relative.as_os_str().is_empty() {
+        relative.push(".");
+    }
+    Some(relative)
+}
+
+/// Returns `path` with a redundant `.` component inserted before its final
+/// component, i.e. "foo/bar/baz" -> "foo/bar/./baz".
+///
+/// Every other lexical component is retained.
+fn redundant_dot_spelling(path: &Path) -> PathBuf {
+    let parent = path.parent().expect("spelling under test has a parent");
+    let name = path
+        .file_name()
+        .expect("spelling under test has a file name");
+    let mut redundant = parent.to_path_buf();
+    redundant.push(".");
+    redundant.push(name);
+    redundant
 }

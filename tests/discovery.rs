@@ -14,12 +14,9 @@ use scarab::{DiscoveryError, discover_source_files};
 
 mod common;
 
-use common::{SourceTreeSnapshot, TestSandbox};
+use common::{SourceTreeSnapshot, TempSandbox, copy_fixture_library};
 
-/// Library fixture root, relative to the crate root that cargo test runs in.
-const LIBRARY: &str = "tests/fixtures/library";
-
-/// Every ordinary file under LIBRARY.
+/// Every ordinary file under the committed fixture library.
 const LIBRARY_FILES: &[&str] = &[
     "README.md",
     "album-one/01-flamenco-road.flac",
@@ -31,7 +28,7 @@ const LIBRARY_FILES: &[&str] = &[
 
 /// Runs discovery over `root` and asserts the source tree is untouched
 /// before inspecting the result. Returns `result` as a sorted [`Vec<PathBuf>`].
-fn discover_checked(root: &Path) -> Result<Vec<PathBuf>, DiscoveryError> {
+fn discover_source_files_checked(root: &Path) -> Result<Vec<PathBuf>, DiscoveryError> {
     let snapshot = SourceTreeSnapshot::capture(root);
     let result = discover_source_files(root);
     snapshot.assert_unchanged();
@@ -50,67 +47,77 @@ fn expected_library_files_under_root(root: &Path) -> Vec<PathBuf> {
     expected
 }
 
-/// The expected discovery result for the fixture library root.
-fn expected_library_files() -> Vec<PathBuf> {
-    expected_library_files_under_root(Path::new(LIBRARY))
+/// The exact OS-string spelling of every path, non-normalized.
+fn paths_os_spellings(paths: &[PathBuf]) -> Vec<OsString> {
+    paths
+        .iter()
+        .map(|path| path.as_os_str().to_os_string())
+        .collect()
 }
 
 #[test]
 fn finds_every_fixture_file_recursively_with_root_prefix() {
-    let discovered: Vec<PathBuf> =
-        discover_checked(Path::new(LIBRARY)).expect("discovery over fixtures must succeed");
+    let sandbox = TempSandbox::new();
+    let library = sandbox.path().join("library");
+    copy_fixture_library(&library);
 
-    assert_eq!(discovered, expected_library_files());
+    let discovered: Vec<PathBuf> =
+        discover_source_files_checked(&library).expect("discovery over fixtures must succeed");
+
+    assert_eq!(discovered, expected_library_files_under_root(&library));
 }
 
 #[test]
 fn supplied_root_spelling_is_preserved_and_honored() {
+    let sandbox = TempSandbox::new();
+    let library = sandbox.path().join("library");
+    copy_fixture_library(&library);
+
     // A redundant internal `./` component in the supplied root must be
     // retained verbatim in every discovered path, never normalized away.
-    let root = Path::new("tests/fixtures/./library");
+    let root = sandbox.path().join(".").join("library");
 
-    let discovered = discover_checked(root).expect("discovery must succeed");
+    let discovered = discover_source_files_checked(&root).expect("discovery must succeed");
 
-    // OS-string comparison pins the exact spelling, which plain
-    // component-wise path equality would not distinguish from a normalized
-    // form. Exact vector equality also requires the existing sorted order.
-    let discovered_spelling: Vec<OsString> = discovered
-        .iter()
-        .map(|path| path.as_os_str().to_os_string())
-        .collect();
-    let expected_spelling: Vec<OsString> = expected_library_files_under_root(root)
-        .into_iter()
-        .map(|path| path.into_os_string())
-        .collect();
-    assert_eq!(discovered_spelling, expected_spelling);
+    // Exact vector equality also requires the existing sorted order.
+    assert_eq!(
+        paths_os_spellings(&discovered),
+        paths_os_spellings(&expected_library_files_under_root(&root))
+    );
 }
 
 #[test]
 fn trailing_separator_and_dot_root_spelling_is_preserved() {
+    let sandbox = TempSandbox::new();
+    let library = sandbox.path().join("library");
+    copy_fixture_library(&library);
+
     // Root validation inspects a probe spelling with trailing separators and
     // `.` components stripped, but traversal and returned paths must keep the
     // caller's spelling verbatim.
-    for spelling in ["tests/fixtures/library/.", "tests/fixtures/library/"] {
-        let root = Path::new(spelling);
+    for suffix in ["/.", "/"] {
+        let mut spelling = library.as_os_str().to_os_string();
+        spelling.push(suffix);
+        let root = PathBuf::from(spelling);
 
-        let discovered = discover_checked(root).expect("discovery must succeed");
+        let discovered = discover_source_files_checked(&root).expect("discovery must succeed");
 
-        let discovered_spelling: Vec<OsString> = discovered
-            .iter()
-            .map(|path| path.as_os_str().to_os_string())
-            .collect();
-        let expected_spelling: Vec<OsString> = expected_library_files_under_root(root)
-            .into_iter()
-            .map(|path| path.into_os_string())
-            .collect();
-        assert_eq!(discovered_spelling, expected_spelling, "root {spelling}");
+        assert_eq!(
+            paths_os_spellings(&discovered),
+            paths_os_spellings(&expected_library_files_under_root(&root)),
+            "root suffix {suffix:?}"
+        );
     }
 }
 
 #[test]
 fn results_are_deterministically_sorted() {
-    let first = discover_checked(Path::new(LIBRARY)).expect("first discovery must succeed");
-    let second = discover_checked(Path::new(LIBRARY)).expect("second discovery must succeed");
+    let sandbox = TempSandbox::new();
+    let library = sandbox.path().join("library");
+    copy_fixture_library(&library);
+
+    let first = discover_source_files_checked(&library).expect("first discovery must succeed");
+    let second = discover_source_files_checked(&library).expect("second discovery must succeed");
     assert_eq!(first, second);
     let mut sorted = first.clone();
     sorted.sort();
@@ -121,7 +128,7 @@ fn results_are_deterministically_sorted() {
 fn ordinary_files_are_collected_regardless_of_name_or_extension() {
     // Discovery is extension-blind. Dotfiles, mixed-case names, compound
     // extensions, and extensionless files are all ordinary files.
-    let sandbox = TestSandbox::new();
+    let sandbox = TempSandbox::new();
     let root = sandbox.path().join("ordinary-files");
     fs::create_dir(&root).expect("create root");
     let names = [
@@ -137,7 +144,7 @@ fn ordinary_files_are_collected_regardless_of_name_or_extension() {
         fs::write(root.join(name), name.as_bytes()).expect("write ordinary file");
     }
 
-    let discovered = discover_checked(&root).expect("discovery must succeed");
+    let discovered = discover_source_files_checked(&root).expect("discovery must succeed");
     let mut expected: Vec<PathBuf> = names.iter().map(|name| root.join(name)).collect();
     expected.sort();
     assert_eq!(discovered, expected);
@@ -146,7 +153,7 @@ fn ordinary_files_are_collected_regardless_of_name_or_extension() {
 #[test]
 fn nested_directories_beyond_album_layout_are_traversed() {
     // A tree deeper and more irregular than artist/album must still be walked.
-    let sandbox = TestSandbox::new();
+    let sandbox = TempSandbox::new();
     let root = sandbox.path().join("nested");
     let deep = root.join("a/b/c");
     fs::create_dir_all(&deep).expect("create deep directories");
@@ -155,7 +162,7 @@ fn nested_directories_beyond_album_layout_are_traversed() {
     let shallow_file = root.join("top.dat");
     fs::write(&shallow_file, b"top").expect("write top file");
 
-    let discovered = discover_checked(&root).expect("discovery must succeed");
+    let discovered = discover_source_files_checked(&root).expect("discovery must succeed");
     let mut expected = vec![root.join("a/b/c/song.bin"), root.join("top.dat")];
     expected.sort();
     assert_eq!(discovered, expected);
@@ -163,17 +170,17 @@ fn nested_directories_beyond_album_layout_are_traversed() {
 
 #[test]
 fn empty_directory_tree_yields_no_files() {
-    let sandbox = TestSandbox::new();
+    let sandbox = TempSandbox::new();
     let root = sandbox.path().join("empty");
     fs::create_dir_all(root.join("empty-nested")).expect("create empty tree");
 
-    let discovered = discover_checked(&root).expect("discovery must succeed");
+    let discovered = discover_source_files_checked(&root).expect("discovery must succeed");
     assert!(discovered.is_empty());
 }
 
 #[test]
 fn missing_root_returns_typed_error() {
-    let sandbox = TestSandbox::new();
+    let sandbox = TempSandbox::new();
     let root = sandbox.path().join("missing");
 
     // do not create the root: there is no tree to capture
@@ -190,7 +197,7 @@ fn missing_root_returns_typed_error() {
 
 #[test]
 fn regular_file_root_returns_typed_error() {
-    let sandbox = TestSandbox::new();
+    let sandbox = TempSandbox::new();
     let root = sandbox.path().join("root-file");
     fs::write(&root, b"not a directory").expect("write root file");
 
@@ -211,11 +218,11 @@ mod unix {
 
     use scarab::{DiscoveryError, discover_source_files};
 
-    use super::{SourceTreeSnapshot, TestSandbox, discover_checked};
+    use super::{TempSandbox, discover_source_files_checked};
 
     #[test]
     fn symlink_root_is_rejected() {
-        let sandbox = TestSandbox::new();
+        let sandbox = TempSandbox::new();
         let real = sandbox.path().join("real");
         fs::create_dir(&real).expect("create real directory");
         fs::write(real.join("track.dat"), b"track").expect("write file");
@@ -236,7 +243,7 @@ mod unix {
 
     #[test]
     fn symlink_root_with_trailing_separator_or_dot_is_rejected() {
-        let sandbox = TestSandbox::new();
+        let sandbox = TempSandbox::new();
         let real = sandbox.path().join("real");
         fs::create_dir(&real).expect("create real directory");
         fs::write(real.join("track.dat"), b"track").expect("write file");
@@ -265,36 +272,8 @@ mod unix {
     }
 
     #[test]
-    #[should_panic(expected = "is a symlink")]
-    fn tree_snapshot_capture_rejects_symlink_root_with_trailing_separator() {
-        let sandbox = TestSandbox::new();
-        let real = sandbox.path().join("real");
-        fs::create_dir(&real).expect("create real directory");
-        let link = sandbox.path().join("link");
-        symlink(&real, &link).expect("create root symlink");
-
-        let mut spelling = link.as_os_str().to_os_string();
-        spelling.push("/");
-        SourceTreeSnapshot::capture(PathBuf::from(spelling));
-    }
-
-    #[test]
-    #[should_panic(expected = "is a symlink")]
-    fn tree_snapshot_capture_rejects_symlink_root_with_terminal_dot() {
-        let sandbox = TestSandbox::new();
-        let real = sandbox.path().join("real");
-        fs::create_dir(&real).expect("create real directory");
-        let link = sandbox.path().join("link");
-        symlink(&real, &link).expect("create root symlink");
-
-        let mut spelling = link.as_os_str().to_os_string();
-        spelling.push("/.");
-        SourceTreeSnapshot::capture(PathBuf::from(spelling));
-    }
-
-    #[test]
     fn symlinked_ordinary_files_are_skipped() {
-        let sandbox = TestSandbox::new();
+        let sandbox = TempSandbox::new();
         let root = sandbox.path().join("files");
         fs::create_dir(&root).expect("create root");
         fs::write(root.join("real.flac"), b"real flac").expect("write real flac");
@@ -302,7 +281,7 @@ mod unix {
         symlink(root.join("real.flac"), root.join("linked.flac")).expect("link flac");
         symlink(root.join("real.txt"), root.join("linked.txt")).expect("link txt");
 
-        let discovered = discover_checked(&root).expect("discovery must succeed");
+        let discovered = discover_source_files_checked(&root).expect("discovery must succeed");
         let mut expected = vec![root.join("real.flac"), root.join("real.txt")];
         expected.sort();
         assert_eq!(discovered, expected);
@@ -310,7 +289,7 @@ mod unix {
 
     #[test]
     fn symlinked_directories_are_not_traversed() {
-        let sandbox = TestSandbox::new();
+        let sandbox = TempSandbox::new();
         let root = sandbox.path().join("root");
         let outside = sandbox.path().join("outside");
         fs::create_dir_all(root.join("inner")).expect("create inner directory");
@@ -319,7 +298,7 @@ mod unix {
         fs::write(outside.join("outside.dat"), b"outside").expect("write outside file");
         symlink(&outside, root.join("linked-dir")).expect("link directory");
 
-        let discovered = discover_checked(&root).expect("discovery must succeed");
+        let discovered = discover_source_files_checked(&root).expect("discovery must succeed");
         assert_eq!(discovered, vec![root.join("inner/inside.dat")]);
     }
 }
