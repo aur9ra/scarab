@@ -12,6 +12,9 @@
 //! model or reports the first problem it finds. Ambiguity, such as a rule
 //! applied twice, is rejected instead of being decided by declaration order.
 //!
+//! Albums declare optional metadata selectors and an optional
+//! filesystem candidate scope.
+//!
 //! [`discover_source_files`] recursively collects every ordinary file under
 //! one source root. [`classify_source_audio`] recognizes whether
 //! one supplied pathname names a supported source-audio format by its final
@@ -31,6 +34,7 @@ pub use source_audio::{SourceAudioFormat, classify_source_audio};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::path::PathBuf;
 
 use serde::Deserialize;
 
@@ -87,26 +91,51 @@ pub struct Files {
     pub exclude: Option<Vec<String>>,
 }
 
-/// Identity metadata for one declared album.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// Optional selectors for one declared album.
+///
+/// `name` and `artist` are optional, independent metadata predicates.
+/// Supplied values are preserved exactly.
+///
+/// `directories` is the collapsed filesystem candidate scope from the
+/// `directory` or `directories` configuration fields. `None` means no
+/// filesystem scope was configured, in which case future resolution uses
+/// the caller-supplied default scope. Configured directories describe
+/// recursive candidate scopes and are preserved exactly, including
+/// order, duplicates, and relative/absolute spelling.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Album {
-    pub name: String,
-    pub artist: String,
+    pub name: Option<String>,
+    pub artist: Option<String>,
+    pub directories: Option<Vec<PathBuf>>,
+}
+
+/// Raw, pre-validation deserialization target for one `[albums.<handle>]`
+/// table.
+///
+/// Keeps the separate singular `directory` and plural `directories` fields
+/// separate until validation collapses them into [`Album::directories`].
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawAlbum {
+    name: Option<String>,
+    artist: Option<String>,
+    directory: Option<String>,
+    directories: Option<Vec<String>>,
 }
 
 /// A bitrate override applied to every track of one or more declared albums.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AlbumRule {
-    pub albums: Vec<String>,
+    #[serde(rename = "albums")]
+    pub album_handles: Vec<String>,
     pub bitrate: u32,
 }
 
 /// A group of track overrides for one declared album.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrackRuleGroup {
-    pub album: String,
+    pub album_handle: String,
     pub rules: Vec<TrackRule>,
 }
 
@@ -114,7 +143,7 @@ pub struct TrackRuleGroup {
 /// along with an action ([`TrackAction`]) to perform
 /// on said tracks ([`TrackTarget`]).
 ///
-/// Access TrackTarget names via [`TrackTarget::names`]
+/// Access TrackTarget track names via [`TrackTarget::track_names`]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrackRule {
     pub target: TrackTarget,
@@ -144,6 +173,7 @@ pub struct LibraryBuildSpec {
     pub encoding_profile: EncodingProfile,
     pub size_mode: SizeMode,
     pub files: Files,
+    /// Albums keyed by their configuration handles.
     pub albums: BTreeMap<String, Album>,
     pub album_rules: Vec<AlbumRule>,
     pub track_rules: Vec<TrackRuleGroup>,
@@ -189,23 +219,37 @@ pub enum InvalidLibraryBuildSpec {
     MissingSizeMode,
     /// Both `bitrate` and `target_size` were configured.
     ConflictingSizeMode,
+    /// An `[albums.<handle>]` table configured none of `name`, `artist`,
+    /// `directory`, or `directories`.
+    MissingAlbumSelector { album_handle: String },
+    /// An album configured both `directory` and `directories`.
+    ConflictingAlbumPaths { album_handle: String },
+    /// An album configured an empty `directory` path.
+    EmptyAlbumDirectory { album_handle: String },
+    /// An album configured an empty `directories` list.
+    EmptyAlbumDirectories { album_handle: String },
+    /// An album configured an empty entry in its `directories` list.
+    EmptyAlbumDirectoriesEntry { album_handle: String, index: usize },
     /// A rule referenced an album handle with no `[albums.<handle>]` entry.
-    UnknownAlbum { handle: String },
+    UnknownAlbum { album_handle: String },
     /// An album rule configured an empty `albums` list.
     EmptyAlbums,
     /// More than one album rule targeted the same album, including twice
     /// within one rule.
-    DuplicateAlbumRule { handle: String },
+    DuplicateAlbumRule { album_handle: String },
     /// More than one track rule targeted the same track of the same album.
-    DuplicateTrackRule { album: String, track: String },
+    DuplicateTrackRule {
+        album_handle: String,
+        track_name: String,
+    },
     /// An explicit `[[track_rules]]` group configured no nested rules.
-    EmptyTrackRules { album: String },
+    EmptyTrackRules { album_handle: String },
     /// A track rule set both `track` and `tracks`, or neither.
-    TrackTargetNotExclusive { album: String },
+    TrackTargetNotExclusive { album_handle: String },
     /// A track rule configured an empty `tracks` list.
-    EmptyTracks { album: String },
+    EmptyTracks { album_handle: String },
     /// A track rule set both `exclude = true` and `bitrate`, or neither.
-    TrackActionNotExclusive { album: String },
+    TrackActionNotExclusive { album_handle: String },
 }
 
 impl std::error::Error for InvalidLibraryBuildSpec {}
@@ -219,37 +263,79 @@ impl fmt::Display for InvalidLibraryBuildSpec {
             InvalidLibraryBuildSpec::ConflictingSizeMode => {
                 write!(f, "bitrate and target_size are mutually exclusive")
             }
-            InvalidLibraryBuildSpec::UnknownAlbum { handle } => {
-                write!(f, "rule references undeclared album handle `{handle}`")
+            InvalidLibraryBuildSpec::MissingAlbumSelector { album_handle } => {
+                write!(
+                    f,
+                    "album `{album_handle}` must set at least one of name, artist, directory, or directories"
+                )
+            }
+            InvalidLibraryBuildSpec::ConflictingAlbumPaths { album_handle } => {
+                write!(
+                    f,
+                    "album `{album_handle}` must set at most one of directory or directories"
+                )
+            }
+            InvalidLibraryBuildSpec::EmptyAlbumDirectory { album_handle } => {
+                write!(f, "album `{album_handle}` has an empty directory path")
+            }
+            InvalidLibraryBuildSpec::EmptyAlbumDirectories { album_handle } => {
+                write!(f, "album `{album_handle}` has an empty directories list")
+            }
+            InvalidLibraryBuildSpec::EmptyAlbumDirectoriesEntry {
+                album_handle,
+                index,
+            } => {
+                write!(
+                    f,
+                    "album `{album_handle}` has an empty directories entry at index {index}"
+                )
+            }
+            InvalidLibraryBuildSpec::UnknownAlbum { album_handle } => {
+                write!(
+                    f,
+                    "rule references undeclared album handle `{album_handle}`"
+                )
             }
             InvalidLibraryBuildSpec::EmptyAlbums => {
                 write!(f, "album rule must list at least one album handle")
             }
-            InvalidLibraryBuildSpec::DuplicateAlbumRule { handle } => {
-                write!(f, "album `{handle}` receives more than one album rule")
-            }
-            InvalidLibraryBuildSpec::DuplicateTrackRule { album, track } => {
+            InvalidLibraryBuildSpec::DuplicateAlbumRule { album_handle } => {
                 write!(
                     f,
-                    "track `{track}` in album `{album}` has more than one rule"
+                    "album `{album_handle}` receives more than one album rule"
                 )
             }
-            InvalidLibraryBuildSpec::EmptyTrackRules { album } => {
-                write!(f, "track rule group for `{album}` has no nested rules")
-            }
-            InvalidLibraryBuildSpec::TrackTargetNotExclusive { album } => {
+            InvalidLibraryBuildSpec::DuplicateTrackRule {
+                album_handle,
+                track_name,
+            } => {
                 write!(
                     f,
-                    "track rule for `{album}` must set exactly one of track or tracks"
+                    "track `{track_name}` in album `{album_handle}` has more than one rule"
                 )
             }
-            InvalidLibraryBuildSpec::EmptyTracks { album } => {
-                write!(f, "track rule for `{album}` has an empty tracks list")
-            }
-            InvalidLibraryBuildSpec::TrackActionNotExclusive { album } => {
+            InvalidLibraryBuildSpec::EmptyTrackRules { album_handle } => {
                 write!(
                     f,
-                    "track rule for `{album}` must set exactly one of exclude or bitrate"
+                    "track rule group for `{album_handle}` has no nested rules"
+                )
+            }
+            InvalidLibraryBuildSpec::TrackTargetNotExclusive { album_handle } => {
+                write!(
+                    f,
+                    "track rule for `{album_handle}` must set exactly one of track or tracks"
+                )
+            }
+            InvalidLibraryBuildSpec::EmptyTracks { album_handle } => {
+                write!(
+                    f,
+                    "track rule for `{album_handle}` has an empty tracks list"
+                )
+            }
+            InvalidLibraryBuildSpec::TrackActionNotExclusive { album_handle } => {
+                write!(
+                    f,
+                    "track rule for `{album_handle}` must set exactly one of exclude or bitrate"
                 )
             }
         }
@@ -267,7 +353,7 @@ struct RawLibraryBuildSpec {
     #[serde(default)]
     files: Files,
     #[serde(default)]
-    albums: BTreeMap<String, Album>,
+    albums: BTreeMap<String, RawAlbum>,
     #[serde(default)]
     album_rules: Vec<AlbumRule>,
     #[serde(default)]
@@ -282,7 +368,8 @@ struct RawLibraryBuildSpec {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawTrackRuleGroup {
-    album: String,
+    #[serde(rename = "album")]
+    album_handle: String,
     #[serde(default)]
     rules: Vec<RawTrackRule>,
 }
@@ -320,18 +407,27 @@ impl RawLibraryBuildSpec {
             (None, None) => return Err(InvalidLibraryBuildSpec::MissingSizeMode.into()),
         };
 
+        // Validate each album declaration before checking rules that
+        // reference handles, so a malformed declaration is reported first.
+        // BTreeMap iteration keeps the order deterministic by handle.
+        let mut validated_albums = BTreeMap::new();
+        for (album_handle, raw_album) in albums {
+            let album = raw_album.into_album(&album_handle)?;
+            validated_albums.insert(album_handle, album);
+        }
+
         // Use a new BTreeSet to determine uniqueness
-        let mut rule_checked_albums = BTreeSet::new();
+        let mut rule_checked_album_handles = BTreeSet::new();
         for rule in &album_rules {
-            if rule.albums.is_empty() {
+            if rule.album_handles.is_empty() {
                 return Err(InvalidLibraryBuildSpec::EmptyAlbums.into());
             }
-            for album in &rule.albums {
-                check_declared(&albums, album)?;
+            for album_handle in &rule.album_handles {
+                check_album_handle_defined(&validated_albums, album_handle)?;
                 // false means duplicate
-                if !rule_checked_albums.insert(album.as_str()) {
+                if !rule_checked_album_handles.insert(album_handle.as_str()) {
                     return Err(InvalidLibraryBuildSpec::DuplicateAlbumRule {
-                        handle: album.clone(),
+                        album_handle: album_handle.clone(),
                     }
                     .into());
                 }
@@ -342,22 +438,27 @@ impl RawLibraryBuildSpec {
         let mut rule_checked_tracks: BTreeSet<(String, String)> = BTreeSet::new();
         let mut validated_groups = Vec::with_capacity(track_rules.len());
         for group in track_rules {
-            check_declared(&albums, &group.album)?;
+            check_album_handle_defined(&validated_albums, &group.album_handle)?;
             if group.rules.is_empty() {
-                return Err(InvalidLibraryBuildSpec::EmptyTrackRules { album: group.album }.into());
+                return Err(InvalidLibraryBuildSpec::EmptyTrackRules {
+                    album_handle: group.album_handle,
+                }
+                .into());
             }
-            let RawTrackRuleGroup { album, rules } = group;
+            let RawTrackRuleGroup {
+                album_handle,
+                rules,
+            } = group;
             let mut validated_rules: Vec<TrackRule> = Vec::with_capacity(rules.len());
-            for raw in rules {
-                let rule: TrackRule = raw.into_rule(&album)?;
-                for track in rule.target.names() {
-                    let track = track.as_str();
-                    let key = (album.clone(), track.to_owned());
+            for raw_rule in rules {
+                let rule: TrackRule = raw_rule.into_rule(&album_handle)?;
+                for track_name in rule.target.track_names() {
+                    let key = (album_handle.clone(), track_name.to_owned());
                     // false means duplicate
                     if !rule_checked_tracks.insert(key) {
                         return Err(InvalidLibraryBuildSpec::DuplicateTrackRule {
-                            album: album.clone(),
-                            track: track.to_owned(),
+                            album_handle: album_handle.clone(),
+                            track_name: track_name.to_owned(),
                         }
                         .into());
                     }
@@ -365,7 +466,7 @@ impl RawLibraryBuildSpec {
                 validated_rules.push(rule);
             }
             validated_groups.push(TrackRuleGroup {
-                album,
+                album_handle,
                 rules: validated_rules,
             });
         }
@@ -375,25 +476,94 @@ impl RawLibraryBuildSpec {
             encoding_profile,
             size_mode,
             files,
-            albums,
+            albums: validated_albums,
             album_rules,
             track_rules: validated_groups,
         })
     }
 }
 
+impl RawAlbum {
+    /// Collapses one raw album declaration into its validated form.
+    ///
+    /// Metadata predicates are preserved exactly, including empty and
+    /// whitespace-only values. The singular `directory` and plural
+    /// `directories` forms collapse into one ordered collection, and no
+    /// successful parse ever produces an empty collection.
+    fn into_album(self, album_handle: &str) -> Result<Album, LibraryBuildSpecError> {
+        let RawAlbum {
+            name,
+            artist,
+            directory,
+            directories,
+        } = self;
+
+        let has_selector =
+            name.is_some() || artist.is_some() || directory.is_some() || directories.is_some();
+
+        if !has_selector {
+            return Err(InvalidLibraryBuildSpec::MissingAlbumSelector {
+                album_handle: album_handle.to_owned(),
+            }
+            .into());
+        }
+
+        let directories = match (directory, directories) {
+            (None, None) => None,
+            (Some(directory), None) => {
+                // An empty decoded string is exactly an empty path
+                if directory.is_empty() {
+                    return Err(InvalidLibraryBuildSpec::EmptyAlbumDirectory {
+                        album_handle: album_handle.to_owned(),
+                    }
+                    .into());
+                }
+                Some(vec![PathBuf::from(directory)])
+            }
+            (None, Some(directories)) => {
+                if directories.is_empty() {
+                    return Err(InvalidLibraryBuildSpec::EmptyAlbumDirectories {
+                        album_handle: album_handle.to_owned(),
+                    }
+                    .into());
+                }
+                if let Some(index) = directories.iter().position(String::is_empty) {
+                    return Err(InvalidLibraryBuildSpec::EmptyAlbumDirectoriesEntry {
+                        album_handle: album_handle.to_owned(),
+                        index,
+                    }
+                    .into());
+                }
+                Some(directories.into_iter().map(PathBuf::from).collect())
+            }
+            (Some(_), Some(_)) => {
+                return Err(InvalidLibraryBuildSpec::ConflictingAlbumPaths {
+                    album_handle: album_handle.to_owned(),
+                }
+                .into());
+            }
+        };
+
+        Ok(Album {
+            name,
+            artist,
+            directories,
+        })
+    }
+}
+
 impl TrackTarget {
-    /// Iterates the names this target applies to.
-    fn names(&self) -> std::slice::Iter<'_, String> {
+    /// Iterates the track names this target applies to.
+    fn track_names(&self) -> std::slice::Iter<'_, String> {
         match self {
-            TrackTarget::Track(track) => std::slice::from_ref(track).iter(),
-            TrackTarget::Tracks(tracks) => tracks.iter(),
+            TrackTarget::Track(track_name) => std::slice::from_ref(track_name).iter(),
+            TrackTarget::Tracks(track_names) => track_names.iter(),
         }
     }
 }
 
 impl RawTrackRule {
-    fn into_rule(self, album: &str) -> Result<TrackRule, LibraryBuildSpecError> {
+    fn into_rule(self, album_handle: &str) -> Result<TrackRule, LibraryBuildSpecError> {
         let RawTrackRule {
             track,
             tracks,
@@ -406,13 +576,13 @@ impl RawTrackRule {
             (None, Some(tracks)) if !tracks.is_empty() => TrackTarget::Tracks(tracks),
             (None, Some(_)) => {
                 return Err(InvalidLibraryBuildSpec::EmptyTracks {
-                    album: album.to_owned(),
+                    album_handle: album_handle.to_owned(),
                 }
                 .into());
             }
             _ => {
                 return Err(InvalidLibraryBuildSpec::TrackTargetNotExclusive {
-                    album: album.to_owned(),
+                    album_handle: album_handle.to_owned(),
                 }
                 .into());
             }
@@ -423,7 +593,7 @@ impl RawTrackRule {
             (None, Some(bitrate)) => TrackAction::Bitrate(bitrate),
             _ => {
                 return Err(InvalidLibraryBuildSpec::TrackActionNotExclusive {
-                    album: album.to_owned(),
+                    album_handle: album_handle.to_owned(),
                 }
                 .into());
             }
@@ -433,15 +603,15 @@ impl RawTrackRule {
     }
 }
 
-fn check_declared(
+fn check_album_handle_defined(
     albums: &BTreeMap<String, Album>,
-    handle: &str,
+    album_handle: &str,
 ) -> Result<(), LibraryBuildSpecError> {
-    if albums.contains_key(handle) {
+    if albums.contains_key(album_handle) {
         Ok(())
     } else {
         Err(InvalidLibraryBuildSpec::UnknownAlbum {
-            handle: handle.to_owned(),
+            album_handle: album_handle.to_owned(),
         }
         .into())
     }
