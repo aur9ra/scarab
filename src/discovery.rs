@@ -11,10 +11,19 @@
 //! album-, metadata-, and probe-blind. It looks only at filesystem names and
 //! entry types, never at file extensions or contents.
 //!
-//! Symlinks are never followed. Symlinked files are skipped, symlinked
-//! directories are not traversed, and a symlink root is rejected. Paths are
-//! returned exactly as constructed from the supplied root prefix. They are
-//! never canonicalized, absolutized, or otherwise rewritten.
+//! Discovery does not resolve or validate album filesystem declarations.
+//! Selecting albums per file is not part of this walk.
+//!
+//! Symlink handling is asymmetric:
+//! - A terminal symlink in the supplied root's own pathname is rejected.
+//! - Symlinks in non-terminal components of the supplied root pathname are
+//!   not independently rejected by discovery and may undergo ordinary
+//!   filesystem path resolution before the walk begins.
+//! - Descendant symlink entries encountered during the walk are skipped.
+//!   Their targets are ignored.
+//!
+//! Returned paths are constructed from the supplied root prefix exactly as
+//! given. They are not canonicalized, absolutized, or rewritten.
 
 use std::fmt;
 use std::fs;
@@ -29,8 +38,12 @@ use std::path::{Path, PathBuf};
 /// Symlinks and all other entry kinds are ignored.
 ///
 /// The root must exist, be an ordinary directory, and not itself be a symlink.
-/// A terminal symlink is rejected even when the supplied spelling ends in
-/// separators or `.` components. Violations are reported as [`DiscoveryError`].
+/// A terminal symlink root is rejected even when the supplied spelling ends in
+/// separators or `.` components. Symlinks in intermediate (non-terminal) components
+/// of the supplied root pathname are not independently rejected and may be resolved
+/// by ordinary filesystem path resolution. Descendant symlink entries are
+/// skipped. Discovery performs no album filesystem-selector resolution or validation.
+/// Root violations are reported as [`DiscoveryError`].
 pub fn discover_source_files(root: &Path) -> Result<Vec<PathBuf>, DiscoveryError> {
     // Validate root directory.
     // POSIX resolution follows a terminal symlink when the spelling ends in a
