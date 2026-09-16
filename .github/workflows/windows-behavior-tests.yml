@@ -1,0 +1,23 @@
+name: Windows behavior tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-behavior-tests:
+    runs-on: windows-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+      - name: Run album-directory resolver unit tests
+        run: cargo test --lib album_directory
+      - name: Run album-directory resolver integration tests
+        run: cargo test --test album_directory
+      - name: Run configuration integration tests
+        run: cargo test --test config
+      - name: Run source-audio classifier unit tests
+        run: cargo test --lib source_audio
