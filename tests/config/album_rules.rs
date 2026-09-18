@@ -18,8 +18,8 @@ fn parses_album_rule_with_one_album() {
         "[[album_rules]]\nalbums = [\"aenima\"]\nbitrate = 96\n",
     ));
     assert_eq!(
-        config.album_rules,
-        vec![AlbumRule {
+        config.album_rules(),
+        &[AlbumRule {
             album_handles: vec!["aenima".into()],
             bitrate: 96,
         }]
@@ -30,8 +30,8 @@ fn parses_album_rule_with_one_album() {
 fn album_rule_applies_to_every_listed_album() {
     let text = "codec = \"opus\"\nbitrate = 128\n[albums.aenima]\nname = \"Ænima\"\nartist = \"Tool\"\n[albums.lateralus]\nname = \"Lateralus\"\nartist = \"Tool\"\n[[album_rules]]\nalbums = [\"aenima\", \"lateralus\"]\nbitrate = 96\n";
     assert_eq!(
-        valid(text).album_rules,
-        vec![AlbumRule {
+        valid(text).album_rules(),
+        &[AlbumRule {
             album_handles: vec!["aenima".into(), "lateralus".into()],
             bitrate: 96,
         }]
@@ -111,7 +111,7 @@ fn album_rule_can_reference_filesystem_only_album() {
 
     let config = valid(&text);
     assert_eq!(
-        config.albums["fs_only"],
+        config.albums()["fs_only"],
         Album {
             name: None,
             artist: None,
@@ -119,8 +119,8 @@ fn album_rule_can_reference_filesystem_only_album() {
         }
     );
     assert_eq!(
-        config.album_rules,
-        vec![AlbumRule {
+        config.album_rules(),
+        &[AlbumRule {
             album_handles: vec!["fs_only".into()],
             bitrate: 96,
         }]

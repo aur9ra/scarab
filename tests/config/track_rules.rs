@@ -27,8 +27,8 @@ fn parses_track_rules() {
         "[[track_rules]]\nalbum = \"aenima\"\nrules = [{ track = \"Stinkfist\", exclude = true }, { tracks = [\"Eulogy\", \"H.\"], bitrate = 64 }]\n",
     );
     assert_eq!(
-        valid(&text).track_rules,
-        vec![TrackRuleGroup {
+        valid(&text).track_rules(),
+        &[TrackRuleGroup {
             album_handle: "aenima".into(),
             rules: vec![
                 TrackRule {
@@ -47,7 +47,7 @@ fn parses_track_rules() {
 #[test]
 fn same_track_name_is_allowed_in_different_albums() {
     let text = "codec = \"opus\"\nbitrate = 128\n[albums.aenima]\nname = \"Ænima\"\nartist = \"Tool\"\n[albums.salival]\nname = \"Salival\"\nartist = \"Tool\"\n[[track_rules]]\nalbum = \"aenima\"\nrules = [{ track = \"Pushit\", bitrate = 64 }]\n[[track_rules]]\nalbum = \"salival\"\nrules = [{ track = \"Pushit\", bitrate = 64 }]\n";
-    assert_eq!(valid(text).track_rules.len(), 2);
+    assert_eq!(valid(text).track_rules().len(), 2);
 }
 
 #[test]
@@ -145,8 +145,8 @@ fn track_rule_group_can_reference_filesystem_only_album() {
 
     let config = valid(text);
     assert_eq!(
-        config.track_rules,
-        vec![TrackRuleGroup {
+        config.track_rules(),
+        &[TrackRuleGroup {
             album_handle: "fs_only".into(),
             rules: vec![TrackRule {
                 target: TrackTarget::Track("Intolerance".into()),

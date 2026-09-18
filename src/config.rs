@@ -118,7 +118,7 @@ pub struct TrackRuleGroup {
 /// along with an action ([`TrackAction`]) to perform
 /// on said tracks ([`TrackTarget`]).
 ///
-/// Access TrackTarget track names via [`TrackTarget::track_names`]
+/// The track names a rule applies to are found in its [`TrackTarget`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrackRule {
     pub target: TrackTarget,
@@ -130,7 +130,8 @@ pub struct TrackRule {
 pub enum TrackTarget {
     /// A single track name.
     Track(String),
-    /// A non-empty list of track names.
+    /// A list of track names. [`parse`] guarantees the list is non-empty.
+    /// Independently constructed `TrackTarget`s do not make this guarantee.
     Tracks(Vec<String>),
 }
 
@@ -141,30 +142,72 @@ pub enum TrackAction {
     Bitrate(u32),
 }
 
-// TODO: LibraryBuildSpec is intended to become a controlled,
-// validated aggregate. Expose shared/read-only access rather than
-// public mutable fields
-
-/// A complete configuration that was internally consistent when
-/// produced by [`parse`]
+/// A complete library build configuration produced by [`parse`].
 ///
-/// Its fields are currently public, so callers may subsequently
-/// mutate the value into a state that [`parse`] can not produce.
+/// The only public construction path from untrusted config input is
+/// [`parse`], which rejects documents violating config-level
+/// rules.
+///
+/// This does not certify filesystem resources, album membership,
+/// metadata matching, interpreted target-size semantics, or deferred
+/// file-selection policy.
+///
+/// Nested values remain freely constructible representations,
+/// and are not necessarily by type certified configuration
+/// fragments. Operations relying on config validation must
+/// retain parsed origin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryBuildSpec {
-    pub codec: Codec,
-    pub encoding_profile: EncodingProfile,
-    pub size_mode: SizeMode,
-    pub files: Files,
+    codec: Codec,
+    encoding_profile: EncodingProfile,
+    size_mode: SizeMode,
+    files: Files,
+    /// Albums keyed by their configuration handles.
+    albums: IndexMap<String, Album>,
+    album_rules: Vec<AlbumRule>,
+    track_rules: Vec<TrackRuleGroup>,
+}
+
+impl LibraryBuildSpec {
+    /// The configured codec.
+    pub fn codec(&self) -> Codec {
+        self.codec
+    }
+
+    /// The configured encoding profile.
+    pub fn encoding_profile(&self) -> EncodingProfile {
+        self.encoding_profile
+    }
+
+    /// The configured global output size mode.
+    pub fn size_mode(&self) -> &SizeMode {
+        &self.size_mode
+    }
+
+    /// The configured file selection.
+    pub fn files(&self) -> &Files {
+        &self.files
+    }
+
     /// Albums keyed by their configuration handles.
     ///
-    /// [`parse`] preserves album declaration order.
-    /// A handle's position is established by TOML-introduction-order.
-    /// Later additions to an album do not change its position
-    /// within this order.
-    pub albums: IndexMap<String, Album>,
-    pub album_rules: Vec<AlbumRule>,
-    pub track_rules: Vec<TrackRuleGroup>,
+    /// [`parse`] preserves album declaration order. A handle's position
+    /// is established by its first introduction in the document, and
+    /// later additions to an album do not change its position within
+    /// this order.
+    pub fn albums(&self) -> &IndexMap<String, Album> {
+        &self.albums
+    }
+
+    /// The configured album rules, in document order.
+    pub fn album_rules(&self) -> &[AlbumRule] {
+        &self.album_rules
+    }
+
+    /// The configured track rule groups, in document order.
+    pub fn track_rules(&self) -> &[TrackRuleGroup] {
+        &self.track_rules
+    }
 }
 
 /// A failure to parse or validate a configuration document.

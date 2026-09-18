@@ -12,7 +12,8 @@ use super::valid;
 #[test]
 fn parses_files_selection() {
     let included = "codec = \"opus\"\nbitrate = 128\n[files]\nalbum_art = true\ninclude = [\"jpg\", \"png\"]\n";
-    let files = valid(included).files;
+    let config = valid(included);
+    let files = config.files();
 
     assert_eq!(files.album_art, Some(true));
     assert_eq!(
@@ -22,7 +23,8 @@ fn parses_files_selection() {
     assert_eq!(files.exclude, None);
 
     let excluded = "codec = \"opus\"\nbitrate = 128\n[files]\nexclude = [\"cue\"]\n";
-    let files = valid(excluded).files;
+    let config = valid(excluded);
+    let files = config.files();
 
     assert_eq!(files.album_art, None);
     assert_eq!(files.include, None);
@@ -32,7 +34,8 @@ fn parses_files_selection() {
 #[test]
 fn parses_files_include_and_exclude_together() {
     let text = "codec = \"opus\"\nbitrate = 128\n[files]\ninclude = [\"jpg\", \"png\"]\nexclude = [\"cue\"]\n";
-    let files = valid(text).files;
+    let config = valid(text);
+    let files = config.files();
 
     assert_eq!(
         files.include,

@@ -15,7 +15,7 @@ use scarab::{Album, InvalidLibraryBuildSpec, LibraryBuildSpec, LibraryBuildSpecE
 use super::{album_config, invalid, rejects_toml, valid};
 
 fn album_directories(config: &LibraryBuildSpec, handle: &str) -> Vec<PathBuf> {
-    config.albums[handle]
+    config.albums()[handle]
         .directories
         .clone()
         .expect("album should have a filesystem scope")
@@ -28,7 +28,7 @@ fn album_declaration_order_is_preserved() {
         "codec = \"opus\"\nbitrate = 128\n[albums.z]\nname = \"Z\"\n[albums.a]\nname = \"A\"\n";
     let config = valid(text);
 
-    let handles: Vec<&str> = config.albums.keys().map(String::as_str).collect();
+    let handles: Vec<&str> = config.albums().keys().map(String::as_str).collect();
     assert_eq!(handles, ["z", "a"]);
 }
 
@@ -56,9 +56,9 @@ fn later_album_additions_retain_first_introduction_position() {
                 albums.z.name = \"Z\"\n";
     let config = valid(text);
 
-    let handles: Vec<&str> = config.albums.keys().map(String::as_str).collect();
+    let handles: Vec<&str> = config.albums().keys().map(String::as_str).collect();
     assert_eq!(handles, ["z", "a"]);
-    assert_eq!(config.albums["z"].name.as_deref(), Some("Z"));
+    assert_eq!(config.albums()["z"].name.as_deref(), Some("Z"));
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn album_rule_references_do_not_establish_album_order() {
                 [albums.a]\nname = \"A\"\n";
     let config = valid(text);
 
-    let handles: Vec<&str> = config.albums.keys().map(String::as_str).collect();
+    let handles: Vec<&str> = config.albums().keys().map(String::as_str).collect();
     assert_eq!(handles, ["z", "a"]);
 }
 
@@ -79,7 +79,7 @@ fn album_rule_references_do_not_establish_album_order() {
 fn parses_optional_metadata_selectors() {
     let name_only = valid(&album_config("name_only", "name = \"Ænima\"\n"));
     assert_eq!(
-        name_only.albums["name_only"],
+        name_only.albums()["name_only"],
         Album {
             name: Some("Ænima".into()),
             artist: None,
@@ -89,7 +89,7 @@ fn parses_optional_metadata_selectors() {
 
     let artist_only = valid(&album_config("artist_only", "artist = \"Tool\"\n"));
     assert_eq!(
-        artist_only.albums["artist_only"],
+        artist_only.albums()["artist_only"],
         Album {
             name: None,
             artist: Some("Tool".into()),
@@ -99,7 +99,7 @@ fn parses_optional_metadata_selectors() {
 
     let empty_name = valid(&album_config("empty_name", "name = \"\"\n"));
     assert_eq!(
-        empty_name.albums["empty_name"],
+        empty_name.albums()["empty_name"],
         Album {
             name: Some(String::new()),
             artist: None,
@@ -109,7 +109,7 @@ fn parses_optional_metadata_selectors() {
 
     let empty_artist = valid(&album_config("empty_artist", "artist = \"\"\n"));
     assert_eq!(
-        empty_artist.albums["empty_artist"],
+        empty_artist.albums()["empty_artist"],
         Album {
             name: None,
             artist: Some(String::new()),
@@ -121,11 +121,11 @@ fn parses_optional_metadata_selectors() {
 #[test]
 fn album_metadata_values_are_preserved_exactly() {
     let whitespace = valid(&album_config("blank", "name = \"   \"\n"));
-    assert_eq!(whitespace.albums["blank"].name.as_deref(), Some("   "));
+    assert_eq!(whitespace.albums()["blank"].name.as_deref(), Some("   "));
 
     let with_artist = valid(&album_config("blank", "name = \"\"\nartist = \"  \"\n"));
     assert_eq!(
-        with_artist.albums["blank"],
+        with_artist.albums()["blank"],
         Album {
             name: Some(String::new()),
             artist: Some("  ".into()),
@@ -138,7 +138,7 @@ fn album_metadata_values_are_preserved_exactly() {
         "name = \"\"\ndirectory = \"Undertow\"\n",
     ));
     assert_eq!(
-        with_directory.albums["blank"],
+        with_directory.albums()["blank"],
         Album {
             name: Some(String::new()),
             artist: None,
@@ -151,7 +151,7 @@ fn album_metadata_values_are_preserved_exactly() {
 fn parses_filesystem_only_albums() {
     let singular = valid(&album_config("fs_only", "directory = \"Undertow\"\n"));
     assert_eq!(
-        singular.albums["fs_only"],
+        singular.albums()["fs_only"],
         Album {
             name: None,
             artist: None,
@@ -164,7 +164,7 @@ fn parses_filesystem_only_albums() {
         "directories = [\"Disc 1\", \"Disc 2\"]\n",
     ));
     assert_eq!(
-        plural.albums["fs_only"],
+        plural.albums()["fs_only"],
         Album {
             name: None,
             artist: None,
@@ -180,7 +180,7 @@ fn parses_metadata_with_filesystem_selectors() {
         "name = \"Lateralus\"\nartist = \"Tool\"\ndirectories = [\"Disc 1\", \"Disc 2\"]\n",
     ));
     assert_eq!(
-        config.albums["mixed"],
+        config.albums()["mixed"],
         Album {
             name: Some("Lateralus".into()),
             artist: Some("Tool".into()),
@@ -196,7 +196,7 @@ fn singular_and_one_element_plural_forms_are_equivalent() {
 
     assert_eq!(singular, plural);
     assert_eq!(
-        singular.albums["undertow"],
+        singular.albums()["undertow"],
         Album {
             name: None,
             artist: None,

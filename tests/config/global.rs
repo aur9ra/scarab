@@ -47,14 +47,14 @@ rules = [
 fn parses_accepted_toml_example() {
     let config = valid(ACCEPTED_EXAMPLE);
 
-    assert_eq!(config.codec, Codec::Opus);
-    assert_eq!(config.encoding_profile, EncodingProfile::Music);
-    assert_eq!(config.size_mode, SizeMode::TargetSize("20 GiB".into()));
-    assert_eq!(config.files.album_art, Some(true));
-    assert_eq!(config.files.include, Some(vec!["lrc".to_string()]));
-    assert_eq!(config.files.exclude, None);
+    assert_eq!(config.codec(), Codec::Opus);
+    assert_eq!(config.encoding_profile(), EncodingProfile::Music);
+    assert_eq!(config.size_mode(), &SizeMode::TargetSize("20 GiB".into()));
+    assert_eq!(config.files().album_art, Some(true));
+    assert_eq!(config.files().include, Some(vec!["lrc".to_string()]));
+    assert_eq!(config.files().exclude, None);
     assert_eq!(
-        config.albums["lateralus"],
+        config.albums()["lateralus"],
         Album {
             name: Some("Lateralus".into()),
             artist: Some("Tool".into()),
@@ -62,7 +62,7 @@ fn parses_accepted_toml_example() {
         }
     );
     assert_eq!(
-        config.albums["ten_thousand_days"],
+        config.albums()["ten_thousand_days"],
         Album {
             name: Some("10,000 Days".into()),
             artist: Some("Tool".into()),
@@ -70,15 +70,15 @@ fn parses_accepted_toml_example() {
         }
     );
     assert_eq!(
-        config.album_rules,
-        vec![AlbumRule {
+        config.album_rules(),
+        &[AlbumRule {
             album_handles: vec!["lateralus".into(), "ten_thousand_days".into()],
             bitrate: 160,
         }]
     );
     assert_eq!(
-        config.track_rules,
-        vec![TrackRuleGroup {
+        config.track_rules(),
+        &[TrackRuleGroup {
             album_handle: "lateralus".into(),
             rules: vec![
                 TrackRule {
@@ -98,34 +98,34 @@ fn parses_accepted_toml_example() {
 fn minimal_config_defaults_to_music_profile() {
     let config = valid(&prefixed(""));
 
-    assert_eq!(config.codec, Codec::Opus);
-    assert_eq!(config.encoding_profile, EncodingProfile::Music);
-    assert_eq!(config.size_mode, SizeMode::Bitrate(128));
-    assert_eq!(config.files, Files::default());
+    assert_eq!(config.codec(), Codec::Opus);
+    assert_eq!(config.encoding_profile(), EncodingProfile::Music);
+    assert_eq!(config.size_mode(), &SizeMode::Bitrate(128));
+    assert_eq!(config.files(), &Files::default());
     assert_eq!(
-        config.albums["aenima"],
+        config.albums()["aenima"],
         Album {
             name: Some("Ænima".into()),
             artist: Some("Tool".into()),
             directories: None,
         }
     );
-    assert!(config.album_rules.is_empty());
-    assert!(config.track_rules.is_empty());
+    assert!(config.album_rules().is_empty());
+    assert!(config.track_rules().is_empty());
 }
 
 #[test]
 fn encoding_profile_none_is_valid() {
     let text = "codec = \"opus\"\nbitrate = 128\nencoding_profile = \"none\"\n";
-    assert_eq!(valid(text).encoding_profile, EncodingProfile::None);
+    assert_eq!(valid(text).encoding_profile(), EncodingProfile::None);
 }
 
 #[test]
 fn target_size_is_preserved_verbatim() {
     let text = "codec = \"opus\"\ntarget_size = \"1.5 GiB\"\n";
     assert_eq!(
-        valid(text).size_mode,
-        SizeMode::TargetSize("1.5 GiB".into())
+        valid(text).size_mode(),
+        &SizeMode::TargetSize("1.5 GiB".into())
     );
 }
 
