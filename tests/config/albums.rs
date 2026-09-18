@@ -22,6 +22,60 @@ fn album_directories(config: &LibraryBuildSpec, handle: &str) -> Vec<PathBuf> {
 }
 
 #[test]
+fn album_declaration_order_is_preserved() {
+    // Declared out of alphabetical order: z before a
+    let text =
+        "codec = \"opus\"\nbitrate = 128\n[albums.z]\nname = \"Z\"\n[albums.a]\nname = \"A\"\n";
+    let config = valid(text);
+
+    let handles: Vec<&str> = config.albums.keys().map(String::as_str).collect();
+    assert_eq!(handles, ["z", "a"]);
+}
+
+#[test]
+fn invalid_albums_are_reported_in_declaration_order() {
+    // Both albums are independently malformed.
+    // z is declared first but sorts last,
+    // so declaration order must select its error.
+    let text = "codec = \"opus\"\nbitrate = 128\n[albums.z]\n[albums.a]\ndirectory = \"\"\n";
+    assert_eq!(
+        invalid(text),
+        InvalidLibraryBuildSpec::MissingAlbumSelector {
+            album_handle: "z".into()
+        }
+    );
+}
+
+#[test]
+fn later_album_additions_retain_first_introduction_position() {
+    // Dotted declarations keep z first and `a` second even though z is
+    // given a name after `a` is introduced.
+    let text = "codec = \"opus\"\nbitrate = 128\n\
+                albums.z.directory = \"z\"\n\
+                albums.a.directory = \"a\"\n\
+                albums.z.name = \"Z\"\n";
+    let config = valid(text);
+
+    let handles: Vec<&str> = config.albums.keys().map(String::as_str).collect();
+    assert_eq!(handles, ["z", "a"]);
+    assert_eq!(config.albums["z"].name.as_deref(), Some("Z"));
+}
+
+#[test]
+fn album_rule_references_do_not_establish_album_order() {
+    // The rule references `a` before its declaration, album iteration still
+    // follows the declaration order of z then a.
+    let text = "codec = \"opus\"\nbitrate = 128\n\
+                [[album_rules]]\nalbums = [\"a\"]\nbitrate = 96\n\
+                [albums.z]\nname = \"Z\"\n\
+                [albums.a]\nname = \"A\"\n";
+    let config = valid(text);
+
+    let handles: Vec<&str> = config.albums.keys().map(String::as_str).collect();
+    assert_eq!(handles, ["z", "a"]);
+}
+
+#[test]
 fn parses_optional_metadata_selectors() {
     let name_only = valid(&album_config("name_only", "name = \"Ænima\"\n"));
     assert_eq!(

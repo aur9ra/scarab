@@ -6,10 +6,11 @@
 
 //! Parsing and validation of Scarab's TOML configuration.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fmt;
 use std::path::PathBuf;
 
+use indexmap::IndexMap;
 use serde::Deserialize;
 
 /// Parses and validates a TOML library configuration document.
@@ -140,7 +141,15 @@ pub enum TrackAction {
     Bitrate(u32),
 }
 
-/// A complete, internally consistent configuration.
+// TODO: LibraryBuildSpec is intended to become a controlled,
+// validated aggregate. Expose shared/read-only access rather than
+// public mutable fields
+
+/// A complete configuration that was internally consistent when
+/// produced by [`parse`]
+///
+/// Its fields are currently public, so callers may subsequently
+/// mutate the value into a state that [`parse`] can not produce.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryBuildSpec {
     pub codec: Codec,
@@ -148,7 +157,12 @@ pub struct LibraryBuildSpec {
     pub size_mode: SizeMode,
     pub files: Files,
     /// Albums keyed by their configuration handles.
-    pub albums: BTreeMap<String, Album>,
+    ///
+    /// [`parse`] preserves album declaration order.
+    /// A handle's position is established by TOML-introduction-order.
+    /// Later additions to an album do not change its position
+    /// within this order.
+    pub albums: IndexMap<String, Album>,
     pub album_rules: Vec<AlbumRule>,
     pub track_rules: Vec<TrackRuleGroup>,
 }
@@ -326,8 +340,10 @@ struct RawLibraryBuildSpec {
     target_size: Option<String>,
     #[serde(default)]
     files: Files,
+    /// Ordered by first introduction of each handle so that
+    /// the validated map preserves declaration order.
     #[serde(default)]
-    albums: BTreeMap<String, RawAlbum>,
+    albums: IndexMap<String, RawAlbum>,
     #[serde(default)]
     album_rules: Vec<AlbumRule>,
     #[serde(default)]
@@ -383,8 +399,7 @@ impl RawLibraryBuildSpec {
 
         // Validate each album declaration before checking rules that
         // reference handles, so a malformed declaration is reported first.
-        // BTreeMap iteration keeps the order deterministic by handle.
-        let mut validated_albums = BTreeMap::new();
+        let mut validated_albums = IndexMap::new();
         for (album_handle, raw_album) in albums {
             let album = raw_album.into_album(&album_handle)?;
             validated_albums.insert(album_handle, album);
@@ -578,7 +593,7 @@ impl RawTrackRule {
 }
 
 fn check_album_handle_defined(
-    albums: &BTreeMap<String, Album>,
+    albums: &IndexMap<String, Album>,
     album_handle: &str,
 ) -> Result<(), LibraryBuildSpecError> {
     if albums.contains_key(album_handle) {
