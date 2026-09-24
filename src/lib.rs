@@ -21,13 +21,17 @@
 //! one supplied pathname names a supported source-audio format by its final
 //! extension. [`probe_track`] describes one supplied source file by
 //! invoking ffprobe. [`resolve_album_directory`] resolves one configured
-//! album directory against one source root and returns its filesystem-resolved
-//! pathname after verifying that a subsequent metadata lookup reports it as a directory.
+//! album directory against one source root and returns its resolved path after
+//! confirming it is a directory. The private `album_scope` module
+//! applies this resolver to configured selectors and prepares a shared default
+//! source root for albums without selectors.
 //!
-//! Discovery, file candidate recognition, and probing as one pipeline, and
-//! album scope analysis over configured directories, are still future work.
+//! Discovery, candidate recognition, and probing are not yet connected into
+//! one pipeline. Album-scope preparation is implemented privately, but is not
+//! yet part of the public API.
 
 mod album_directory;
+mod album_scope;
 mod config;
 mod discovery;
 mod probe;

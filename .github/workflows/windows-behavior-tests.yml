@@ -17,6 +17,8 @@ jobs:
         run: cargo test --lib album_directory
       - name: Run album-directory resolver integration tests
         run: cargo test --test album_directory
+      - name: Run album-scope preparation unit tests
+        run: cargo test --lib album_scope
       - name: Run configuration integration tests
         run: cargo test --test config
       - name: Run source-audio classifier unit tests
