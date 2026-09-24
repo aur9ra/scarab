@@ -27,14 +27,15 @@
 //! source root for albums without selectors.
 //!
 //! Discovery, candidate recognition, and probing are not yet connected into
-//! one pipeline. Album-scope preparation is implemented privately, but is not
-//! yet part of the public API.
+//! one pipeline. Album-scope preparation and required discovery are
+//! implemented but not yet exposed in the public API.
 
 mod album_directory;
 mod album_scope;
 mod config;
 mod discovery;
 mod probe;
+mod required_discovery;
 mod source_audio;
 
 pub use album_directory::resolve_album_directory;
