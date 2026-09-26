@@ -23,3 +23,9 @@ jobs:
         run: cargo test --test config
       - name: Run source-audio classifier unit tests
         run: cargo test --lib source_audio
+      - name: Run required-discovery unit tests
+        run: cargo test --lib required_discovery
+      - name: Run candidate-inventory unit tests
+        run: cargo test --lib candidate_inventory
+      - name: Run candidate-inventory integration tests
+        run: cargo test --test candidate_inventory

@@ -22,16 +22,18 @@
 //! extension. [`probe_track`] describes one supplied source file by
 //! invoking ffprobe. [`resolve_album_directory`] resolves one configured
 //! album directory against one source root and returns its resolved path after
-//! confirming it is a directory. The private `album_scope` module
-//! applies this resolver to configured selectors and prepares a shared default
-//! source root for albums without selectors.
+//! confirming it is a directory. The private `album_scope` module applies
+//! this resolver to configured selectors and prepares the shared default root
+//! for albums without selectors. `required_discovery` scans each prepared
+//! scope, and [`build_candidate_inventory`] combines both steps into a
+//! filesystem candidate inventory.
 //!
-//! Discovery, candidate recognition, and probing are not yet connected into
-//! one pipeline. Album-scope preparation and required discovery are
-//! implemented but not yet exposed in the public API.
+//! Discovery, candidate recognition, and probing are not yet connected into a
+//! single pipeline.
 
 mod album_directory;
 mod album_scope;
+mod candidate_inventory;
 mod config;
 mod discovery;
 mod probe;
@@ -39,6 +41,12 @@ mod required_discovery;
 mod source_audio;
 
 pub use album_directory::resolve_album_directory;
+pub use candidate_inventory::{
+    Candidate, CandidateInventory, CandidateInventoryFailure, CandidateInventorySuccess,
+    ConfiguredSelectorFailure, DefaultSourceRootFailure, DefaultSourceRootFailureKind,
+    RedundantConfiguredSelectors, RequiredScope, RequiredScopeDiscoveryFailure,
+    build_candidate_inventory,
+};
 pub use config::{
     Album, AlbumRule, Codec, EncodingProfile, Files, InvalidLibraryBuildSpec, LibraryBuildSpec,
     LibraryBuildSpecError, SizeMode, TrackAction, TrackRule, TrackRuleGroup, TrackTarget, parse,
