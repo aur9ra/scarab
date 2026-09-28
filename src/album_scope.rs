@@ -325,28 +325,10 @@ fn default_root_form_supported(root: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{
+        SourceTreeSnapshot, TempSandbox, canonical, create_source, expect_prepared, parse_spec,
+    };
     use std::ffi::OsStr;
-
-    /// Parses a test spec with the supplied album declarations.
-    fn parse_spec(album_declarations: &str) -> LibraryBuildSpec {
-        let text = format!("codec = \"opus\"\nbitrate = 128\n{album_declarations}");
-        crate::parse(&text).expect("test configuration must parse and validate")
-    }
-
-    fn new_sandbox() -> tempfile::TempDir {
-        tempfile::tempdir().expect("create test sandbox")
-    }
-
-    fn create_source(sandbox: &tempfile::TempDir) -> PathBuf {
-        let source = sandbox.path().join("source");
-        fs::create_dir(&source).expect("create source root");
-        source
-    }
-
-    fn canonical(path: &Path) -> PathBuf {
-        fs::canonicalize(path)
-            .unwrap_or_else(|error| panic!("expected {} to canonicalize: {error}", path.display()))
-    }
 
     /// Compares `error` with a fresh canonicalization failure for `effective`.
     fn assert_native_canonicalize_error(error: &io::Error, effective: &Path) {
@@ -385,22 +367,6 @@ mod tests {
         escaped
     }
 
-    fn expect_prepared(
-        preparation: AlbumScopePreparation,
-    ) -> (PreparedAlbumScopes, Vec<RedundancyWarning>) {
-        match preparation {
-            AlbumScopePreparation::Prepared { scopes, warnings } => (scopes, warnings),
-            AlbumScopePreparation::Failed {
-                configured_failures,
-                default_source_root_failure,
-                warnings,
-            } => panic!(
-                "expected complete preparation, got failures {configured_failures:?} \
-                 {default_source_root_failure:?} and warnings {warnings:?}"
-            ),
-        }
-    }
-
     fn expect_failed(
         preparation: AlbumScopePreparation,
     ) -> (
@@ -420,46 +386,9 @@ mod tests {
         }
     }
 
-    #[derive(Debug, PartialEq)]
-    enum TreeEntryKind {
-        Directory,
-        File,
-        Other,
-    }
-
-    /// Captures each descendant's path, type, and file bytes, sorted by path.
-    /// Includes directories and reads entry types without following symlinks.
-    fn tree_fingerprint(root: &Path) -> Vec<(PathBuf, TreeEntryKind, Vec<u8>)> {
-        fn walk(dir: &Path, entries: &mut Vec<(PathBuf, TreeEntryKind, Vec<u8>)>) {
-            for entry in fs::read_dir(dir).expect("read tree directory") {
-                let entry = entry.expect("read tree entry");
-                let path = entry.path();
-                let kind = match entry.file_type().expect("read tree entry type") {
-                    file_type if file_type.is_dir() => TreeEntryKind::Directory,
-                    file_type if file_type.is_file() => TreeEntryKind::File,
-                    _ => TreeEntryKind::Other,
-                };
-                let bytes = match kind {
-                    TreeEntryKind::File => fs::read(&path).expect("read tree file"),
-                    _ => Vec::new(),
-                };
-                let descend = kind == TreeEntryKind::Directory;
-                entries.push((path.clone(), kind, bytes));
-                if descend {
-                    walk(&path, entries);
-                }
-            }
-        }
-
-        let mut entries = Vec::new();
-        walk(root, &mut entries);
-        entries.sort_by(|left, right| left.0.cmp(&right.0));
-        entries
-    }
-
     #[test]
     fn zero_albums_succeed_without_inspecting_a_nonexistent_root() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let missing_root = sandbox.path().join("missing-root");
         let spec = parse_spec("");
 
@@ -472,7 +401,7 @@ mod tests {
 
     #[test]
     fn configured_only_albums_prepare_no_default_source_root() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         fs::create_dir(source.join("Lateralus")).expect("create album directory");
         let spec = parse_spec("[albums.tool]\ndirectory = \"Lateralus\"\n");
@@ -494,7 +423,7 @@ mod tests {
 
     #[test]
     fn absolute_configured_selector_prepares_with_an_unrelated_nonexistent_root() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let target = sandbox.path().join("absolute-target");
         fs::create_dir(&target).expect("create target");
         let missing_root = sandbox.path().join("missing-root");
@@ -517,7 +446,7 @@ mod tests {
 
     #[test]
     fn one_dependent_album_prepares_the_default_source_root() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let spec = parse_spec("[albums.tool]\nname = \"Tool\"\n");
 
@@ -538,7 +467,7 @@ mod tests {
 
     #[test]
     fn several_dependent_albums_retain_declaration_order() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         fs::create_dir(source.join("Lateralus")).expect("create album directory");
         let spec = parse_spec(
@@ -562,7 +491,7 @@ mod tests {
 
     #[test]
     fn default_source_root_scope_retains_the_exact_original_spelling() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let spelling = source.join(".");
         let spec = parse_spec("[albums.tool]\nname = \"Tool\"\n");
@@ -638,7 +567,7 @@ mod tests {
 
     #[test]
     fn missing_default_source_root_reports_native_resolution_failure() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let missing_root = sandbox.path().join("missing-root");
         let spec = parse_spec("[albums.tool]\nname = \"Tool\"\n");
 
@@ -663,7 +592,7 @@ mod tests {
 
     #[test]
     fn ordinary_file_default_source_root_reports_resolved_target_not_directory() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let file = sandbox.path().join("source-file");
         fs::write(&file, b"not a directory").expect("write file");
         let spec = parse_spec("[albums.tool]\nname = \"Tool\"\n");
@@ -681,7 +610,7 @@ mod tests {
 
     #[test]
     fn identical_successful_occurrences_group_with_one_warning() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let album = source.join("Lateralus");
         fs::create_dir(&album).expect("create album directory");
@@ -708,7 +637,7 @@ mod tests {
 
     #[test]
     fn three_equal_root_occurrences_retain_all_spellings_with_one_warning() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let album = source.join("Lateralus");
         fs::create_dir(&album).expect("create album directory");
@@ -736,7 +665,7 @@ mod tests {
 
     #[test]
     fn distinct_resolved_directories_form_distinct_groups_in_occurrence_order() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         fs::create_dir(source.join("album-one")).expect("create album-one");
         fs::create_dir(source.join("album-two")).expect("create album-two");
@@ -763,7 +692,7 @@ mod tests {
 
     #[test]
     fn ancestor_and_descendant_resolved_directories_are_not_merged() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         fs::create_dir_all(source.join("parent/child")).expect("create parent and child");
 
@@ -795,7 +724,7 @@ mod tests {
 
     #[test]
     fn equal_configured_roots_across_albums_remain_separate() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let album = source.join("Lateralus");
         fs::create_dir(&album).expect("create album directory");
@@ -821,7 +750,7 @@ mod tests {
 
     #[test]
     fn configured_and_default_equal_roots_stay_separate_without_warning() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let spec = parse_spec(
             "[albums.one]\ndirectory = \".\"\n\
@@ -847,7 +776,7 @@ mod tests {
 
     #[test]
     fn repeated_missing_selectors_produce_repeated_ordered_failures() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let spec = parse_spec("[albums.tool]\ndirectories = [\"missing\", \"missing\"]\n");
 
@@ -873,7 +802,7 @@ mod tests {
 
     #[test]
     fn distinct_missing_selectors_retain_occurrence_order() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let spec = parse_spec("[albums.tool]\ndirectories = [\"missing-b\", \"missing-a\"]\n");
 
@@ -895,7 +824,7 @@ mod tests {
 
     #[test]
     fn mixed_successes_and_failures_retain_diagnostics_and_warnings() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         fs::create_dir(source.join("album-one")).expect("create album-one");
         fs::create_dir(source.join("album-two")).expect("create album-two");
@@ -933,7 +862,7 @@ mod tests {
 
     #[test]
     fn failing_configured_and_default_mechanisms_retain_both_categories() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let missing_root = sandbox.path().join("missing-root");
         let missing_album = sandbox.path().join("missing-album");
         let spec = parse_spec(&format!(
@@ -960,7 +889,7 @@ mod tests {
 
     #[test]
     fn preparation_does_not_mutate_the_source_tree() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         fs::create_dir(source.join("album-one")).expect("create album-one");
         fs::write(source.join("album-one/01-track.flac"), b"track bytes").expect("write track");
@@ -975,17 +904,13 @@ mod tests {
              [albums.dependent]\nname = \"Dependent\"\n",
         );
 
-        let before = tree_fingerprint(&source);
-        let (configured_failures, default_failure, _) =
-            expect_failed(prepare_album_scopes(&spec, &source));
+        let snapshot = SourceTreeSnapshot::capture(&source);
+        let preparation = prepare_album_scopes(&spec, &source);
+        snapshot.assert_unchanged();
 
+        let (configured_failures, default_failure, _) = expect_failed(preparation);
         assert_eq!(configured_failures.len(), 1);
         assert!(default_failure.is_none());
-        assert_eq!(
-            tree_fingerprint(&source),
-            before,
-            "preparation must not mutate the source tree"
-        );
     }
 
     #[cfg(windows)]

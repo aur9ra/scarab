@@ -39,6 +39,8 @@ mod discovery;
 mod probe;
 mod required_discovery;
 mod source_audio;
+#[cfg(test)]
+mod test_support;
 
 pub use album_directory::resolve_album_directory;
 pub use candidate_inventory::{

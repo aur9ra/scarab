@@ -144,45 +144,11 @@ pub(crate) fn discover_required_files(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::album_scope::{AlbumScopePreparation, prepare_album_scopes};
+    use crate::album_scope::prepare_album_scopes;
+    use crate::test_support::{
+        SourceTreeSnapshot, TempSandbox, canonical, create_source, expect_prepared, parse_spec,
+    };
     use std::fs;
-    use std::path::Path;
-
-    fn parse_spec(album_declarations: &str) -> crate::config::LibraryBuildSpec {
-        let text = format!("codec = \"opus\"\nbitrate = 128\n{album_declarations}");
-        crate::parse(&text).expect("test configuration must parse and validate")
-    }
-
-    fn new_sandbox() -> tempfile::TempDir {
-        tempfile::tempdir().expect("create test sandbox")
-    }
-
-    fn create_source(sandbox: &tempfile::TempDir) -> PathBuf {
-        let source = sandbox.path().join("source");
-        fs::create_dir(&source).expect("create source root");
-        source
-    }
-
-    fn canonical(path: &Path) -> PathBuf {
-        fs::canonicalize(path)
-            .unwrap_or_else(|error| panic!("expected {} to canonicalize: {error}", path.display()))
-    }
-
-    fn expect_prepared(
-        preparation: AlbumScopePreparation,
-    ) -> (PreparedAlbumScopes, Vec<RedundancyWarning>) {
-        match preparation {
-            AlbumScopePreparation::Prepared { scopes, warnings } => (scopes, warnings),
-            AlbumScopePreparation::Failed {
-                configured_failures,
-                default_source_root_failure,
-                warnings,
-            } => panic!(
-                "expected complete preparation, got failures {configured_failures:?} \
-                 {default_source_root_failure:?} and warnings {warnings:?}"
-            ),
-        }
-    }
 
     fn expect_completed(outcome: RequiredDiscovery) -> (RequiredCoverage, Vec<RedundancyWarning>) {
         match outcome {
@@ -204,44 +170,9 @@ mod tests {
         }
     }
 
-    #[derive(Debug, PartialEq)]
-    enum TreeEntryKind {
-        Directory,
-        File,
-        Other,
-    }
-
-    fn tree_fingerprint(root: &Path) -> Vec<(PathBuf, TreeEntryKind, Vec<u8>)> {
-        fn walk(dir: &Path, entries: &mut Vec<(PathBuf, TreeEntryKind, Vec<u8>)>) {
-            for entry in fs::read_dir(dir).expect("read tree directory") {
-                let entry = entry.expect("read tree entry");
-                let path = entry.path();
-                let kind = match entry.file_type().expect("read tree entry type") {
-                    file_type if file_type.is_dir() => TreeEntryKind::Directory,
-                    file_type if file_type.is_file() => TreeEntryKind::File,
-                    _ => TreeEntryKind::Other,
-                };
-                let bytes = match kind {
-                    TreeEntryKind::File => fs::read(&path).expect("read tree file"),
-                    _ => Vec::new(),
-                };
-                let descend = kind == TreeEntryKind::Directory;
-                entries.push((path.clone(), kind, bytes));
-                if descend {
-                    walk(&path, entries);
-                }
-            }
-        }
-
-        let mut entries = Vec::new();
-        walk(root, &mut entries);
-        entries.sort_by(|left, right| left.0.cmp(&right.0));
-        entries
-    }
-
     #[test]
     fn zero_scopes_succeed_without_scanning() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let missing_root = sandbox.path().join("missing-root");
         let spec = parse_spec("");
 
@@ -259,7 +190,7 @@ mod tests {
 
     #[test]
     fn one_configured_scope_collects_ordinary_files_file_blind() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let fear_of_a_blank_planet = source.join("Fear of a Blank Planet");
         fs::create_dir(&fear_of_a_blank_planet).expect("create album directory");
@@ -307,7 +238,7 @@ mod tests {
 
     #[test]
     fn shared_default_scope_retains_several_dependent_albums() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         fs::write(source.join("sentinel.txt"), b"sentinel").expect("write sentinel");
         let spec = parse_spec(
@@ -332,7 +263,7 @@ mod tests {
 
     #[test]
     fn several_scopes_succeed_with_empty_scope_covered() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let fear_of_a_blank_planet = source.join("Fear of a Blank Planet");
         fs::create_dir(&fear_of_a_blank_planet).expect("create album with files");
@@ -370,7 +301,7 @@ mod tests {
 
     #[test]
     fn removing_two_of_three_roots_retains_both_failures() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         for name in ["a", "b", "c"] {
             let dir = source.join(name);
@@ -402,7 +333,7 @@ mod tests {
 
     #[test]
     fn configured_and_default_failures_are_both_retained() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let deadwing = source.join("Deadwing");
         fs::create_dir(&deadwing).expect("create album directory");
@@ -435,7 +366,7 @@ mod tests {
 
     #[test]
     fn parent_and_child_scopes_remain_independent_after_removing_child() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         fs::create_dir_all(source.join("parent/child")).expect("create parent and child");
         fs::write(source.join("parent/top.dat"), b"top").expect("write parent file");
@@ -470,7 +401,7 @@ mod tests {
 
     #[test]
     fn equal_configured_roots_across_albums_remain_separate() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let shared = source.join("shared");
         fs::create_dir(&shared).expect("create shared directory");
@@ -498,7 +429,7 @@ mod tests {
 
     #[test]
     fn equal_configured_and_default_roots_remain_separate() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         fs::write(source.join("Blackest Eyes.flac"), b"track").expect("write track");
         let spec = parse_spec(
@@ -527,7 +458,7 @@ mod tests {
 
     #[test]
     fn redundancy_warnings_survive_successful_discovery() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let stupid_dream = source.join("Stupid Dream");
         fs::create_dir(&stupid_dream).expect("create album directory");
@@ -552,7 +483,7 @@ mod tests {
 
     #[test]
     fn redundancy_warnings_survive_failed_discovery() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let fear_of_a_blank_planet = source.join("Fear of a Blank Planet");
         fs::create_dir(&fear_of_a_blank_planet).expect("create album directory");
@@ -583,7 +514,7 @@ mod tests {
     fn symlink_selector_uses_resolved_root() {
         use std::os::unix::fs::symlink;
 
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let real = source.join("real");
         fs::create_dir(&real).expect("create real directory");
@@ -613,7 +544,7 @@ mod tests {
 
     #[test]
     fn discovery_does_not_mutate_the_source_tree() {
-        let sandbox = new_sandbox();
+        let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let fear_of_a_blank_planet = source.join("Fear of a Blank Planet");
         fs::create_dir(&fear_of_a_blank_planet).expect("create Fear of a Blank Planet");
@@ -633,13 +564,9 @@ mod tests {
         );
 
         let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
-        let before = tree_fingerprint(&source);
+        let snapshot = SourceTreeSnapshot::capture(&source);
         let outcome = discover_required_files(scopes, warnings);
-        assert_eq!(
-            tree_fingerprint(&source),
-            before,
-            "discovery must not mutate the source tree"
-        );
+        snapshot.assert_unchanged();
 
         let (coverage, _) = expect_completed(outcome);
         assert_eq!(coverage.configured.len(), 2);
