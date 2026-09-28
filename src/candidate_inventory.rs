@@ -358,6 +358,26 @@ fn default_failure_from_private(
     }
 }
 
+fn required_scope_from_configured_directory(
+    scope: crate::album_scope::ConfiguredDirectoryScope,
+) -> RequiredScope {
+    RequiredScope::ConfiguredDirectory {
+        album_handle: scope.album_handle,
+        resolved_directory: scope.resolved_directory,
+        contributing_selectors: scope.contributing_selectors,
+    }
+}
+
+fn required_scope_from_default_source_root(
+    scope: crate::album_scope::DefaultSourceRootScope,
+) -> RequiredScope {
+    RequiredScope::DefaultSourceRoot {
+        original_source_root: scope.original_source_root,
+        resolved_traversal_root: scope.resolved_traversal_root,
+        dependent_album_handles: scope.dependent_album_handles,
+    }
+}
+
 fn discovery_failures_from_private(
     failures: crate::required_discovery::RequiredFailures,
 ) -> Vec<RequiredScopeDiscoveryFailure> {
@@ -365,21 +385,13 @@ fn discovery_failures_from_private(
         Vec::with_capacity(failures.configured.len() + failures.default.iter().len());
     for failure in failures.configured {
         converted.push(RequiredScopeDiscoveryFailure {
-            scope: RequiredScope::ConfiguredDirectory {
-                album_handle: failure.scope.album_handle,
-                resolved_directory: failure.scope.resolved_directory,
-                contributing_selectors: failure.scope.contributing_selectors,
-            },
+            scope: required_scope_from_configured_directory(failure.scope),
             error: failure.error,
         });
     }
     if let Some(failure) = failures.default {
         converted.push(RequiredScopeDiscoveryFailure {
-            scope: RequiredScope::DefaultSourceRoot {
-                original_source_root: failure.scope.original_source_root,
-                resolved_traversal_root: failure.scope.resolved_traversal_root,
-                dependent_album_handles: failure.scope.dependent_album_handles,
-            },
+            scope: required_scope_from_default_source_root(failure.scope),
             error: failure.error,
         });
     }
@@ -392,19 +404,11 @@ fn aggregate_coverage(coverage: crate::required_discovery::RequiredCoverage) -> 
     let mut files_per_scope: Vec<Vec<PathBuf>> =
         Vec::with_capacity(coverage.configured.len() + coverage.default.iter().len());
     for entry in coverage.configured {
-        scopes.push(RequiredScope::ConfiguredDirectory {
-            album_handle: entry.scope.album_handle,
-            resolved_directory: entry.scope.resolved_directory,
-            contributing_selectors: entry.scope.contributing_selectors,
-        });
+        scopes.push(required_scope_from_configured_directory(entry.scope));
         files_per_scope.push(entry.files);
     }
     if let Some(entry) = coverage.default {
-        scopes.push(RequiredScope::DefaultSourceRoot {
-            original_source_root: entry.scope.original_source_root,
-            resolved_traversal_root: entry.scope.resolved_traversal_root,
-            dependent_album_handles: entry.scope.dependent_album_handles,
-        });
+        scopes.push(required_scope_from_default_source_root(entry.scope));
         files_per_scope.push(entry.files);
     }
     aggregate_observations(scopes, files_per_scope)
@@ -558,6 +562,85 @@ mod tests {
             1,
             "one scope yields one association even with duplicate equal observations"
         );
+    }
+
+    #[test]
+    fn required_scope_translation_preserves_owned_fields_and_spellings() {
+        let configured = required_scope_from_configured_directory(
+            crate::album_scope::ConfiguredDirectoryScope {
+                album_handle: "deadwing".to_owned(),
+                resolved_directory: PathBuf::from("/music/./Deadwing"),
+                contributing_selectors: vec![
+                    PathBuf::from("Deadwing"),
+                    PathBuf::from("./Deadwing"),
+                    PathBuf::from("Deadwing"),
+                ],
+            },
+        );
+        match configured {
+            RequiredScope::ConfiguredDirectory {
+                album_handle,
+                resolved_directory,
+                contributing_selectors,
+            } => {
+                assert_eq!(album_handle, "deadwing");
+                assert_eq!(
+                    resolved_directory.as_os_str(),
+                    OsStr::new("/music/./Deadwing"),
+                    "resolved spelling must move unchanged"
+                );
+                assert_eq!(
+                    contributing_selectors.len(),
+                    3,
+                    "length of contributing selectors must survive"
+                );
+                assert_eq!(
+                    contributing_selectors[0].as_os_str(),
+                    OsStr::new("Deadwing")
+                );
+                assert_eq!(
+                    contributing_selectors[1].as_os_str(),
+                    OsStr::new("./Deadwing")
+                );
+                assert_eq!(
+                    contributing_selectors[2].as_os_str(),
+                    OsStr::new("Deadwing")
+                );
+            }
+            other => panic!("configured translation must stay configured, got {other:?}"),
+        }
+
+        let default =
+            required_scope_from_default_source_root(crate::album_scope::DefaultSourceRootScope {
+                original_source_root: PathBuf::from("./source"),
+                resolved_traversal_root: PathBuf::from("/music/source/./"),
+                dependent_album_handles: vec!["z".to_owned(), "a".to_owned()],
+            });
+        match default {
+            RequiredScope::DefaultSourceRoot {
+                original_source_root,
+                resolved_traversal_root,
+                dependent_album_handles,
+            } => {
+                assert_eq!(
+                    original_source_root.as_os_str(),
+                    OsStr::new("./source"),
+                    "caller spelling must move unchanged"
+                );
+                assert_eq!(
+                    resolved_traversal_root.as_os_str(),
+                    OsStr::new("/music/source/./"),
+                    "resolved spelling must move unchanged"
+                );
+                assert_eq!(
+                    dependent_album_handles.len(),
+                    2,
+                    "length of dependent album handles must survive"
+                );
+                assert_eq!(dependent_album_handles, ["z", "a"]);
+            }
+            other => panic!("default translation must stay default, got {other:?}"),
+        }
     }
 
     #[test]
