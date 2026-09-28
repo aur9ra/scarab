@@ -44,21 +44,7 @@ pub fn classify_source_audio(path: &Path) -> Option<SourceAudioFormat> {
 /// Compares an extension against `flac` ASCII-case-insensitively without
 /// requiring the extension to be valid UTF-8.
 fn is_flac_extension(extension: &OsStr) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::ffi::OsStrExt;
-        extension.as_bytes().eq_ignore_ascii_case(b"flac")
-    }
-    // non-unix branch is unverified at runtime
-    // let me know if this doesn't work, please :)
-    #[cfg(not(unix))]
-    {
-        // A non-UTF-8 extension cannot equal the ASCII spelling `flac`
-        // on this platform, so treating it as unsupported matches the classifier's needs.
-        extension
-            .to_str()
-            .is_some_and(|text| text.eq_ignore_ascii_case("flac"))
-    }
+    extension.eq_ignore_ascii_case("flac")
 }
 
 #[cfg(test)]
