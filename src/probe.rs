@@ -74,6 +74,7 @@ pub struct ProbedTrack {
 
 /// A failure to probe a source file with ffprobe.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ProbeError {
     /// Error starting ffprobe.
     Spawn(std::io::Error),

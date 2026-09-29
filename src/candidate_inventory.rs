@@ -270,6 +270,7 @@ pub struct DefaultSourceRootFailure {
 
 /// Reason default source root preparation failed.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DefaultSourceRootFailureKind {
     /// The supplied root is empty.
     EmptyInput,

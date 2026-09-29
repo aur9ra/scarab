@@ -28,6 +28,7 @@ pub fn parse(text: &str) -> Result<LibraryBuildSpec, LibraryBuildSpecError> {
 /// The only codec supported by the prototype.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum Codec {
     Opus,
 }
@@ -35,6 +36,7 @@ pub enum Codec {
 /// Opus encoding profile, defaulting to `music` when omitted.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum EncodingProfile {
     #[default]
     Music,
@@ -137,6 +139,7 @@ pub enum TrackTarget {
 
 /// The effect to be applied to a track.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TrackAction {
     Exclude,
     Bitrate(u32),
@@ -253,6 +256,7 @@ impl From<InvalidLibraryBuildSpec> for LibraryBuildSpecError {
 
 /// Configuration-internal rules enforced by [`parse`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum InvalidLibraryBuildSpec {
     /// Neither `bitrate` nor `target_size` was configured.
     MissingSizeMode,

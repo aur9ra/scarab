@@ -22,6 +22,7 @@ use std::path::Path;
 
 /// A source-audio format recognized by lexical pathname inspection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SourceAudioFormat {
     Flac,
 }

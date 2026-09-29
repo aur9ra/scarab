@@ -114,6 +114,7 @@ fn walk(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), DiscoveryError> {
 
 /// A failure to discover source files under a source root.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DiscoveryError {
     /// The root path could not be inspected.
     Root {
