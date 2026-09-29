@@ -179,7 +179,7 @@ pub(crate) fn prepare_album_scopes(
                     {
                         Some(scope) => scope.contributing_selectors.push(selector.clone()),
                         None => album_scopes.push(ConfiguredDirectoryScope {
-                            album_handle: album_handle.clone(),
+                            album_handle: album_handle.to_owned(),
                             resolved_directory,
                             contributing_selectors: vec![selector.clone()],
                         }),
@@ -187,7 +187,7 @@ pub(crate) fn prepare_album_scopes(
                 }
                 // Accumulate errors and continue
                 Err(error) => configured_failures.push(ConfiguredSelectorFailure {
-                    album_handle: album_handle.clone(),
+                    album_handle: album_handle.to_owned(),
                     configured_selector: selector.clone(),
                     error,
                 }),
@@ -208,9 +208,8 @@ pub(crate) fn prepare_album_scopes(
 
     let dependent_album_handles: Vec<String> = spec
         .albums()
-        .iter()
         .filter(|(_, album)| album.directories.is_none())
-        .map(|(album_handle, _)| album_handle.clone())
+        .map(|(album_handle, _)| album_handle.to_owned())
         .collect();
 
     // Only prepare a default root when at least one album needs it.

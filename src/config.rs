@@ -189,14 +189,22 @@ impl LibraryBuildSpec {
         &self.files
     }
 
-    /// Albums keyed by their configuration handles.
+    /// Returns declared albums as `(handle, album)` pairs in declaration order.
     ///
-    /// [`parse`] preserves album declaration order. A handle's position
-    /// is established by its first introduction in the document, and
-    /// later additions to an album do not change its position within
-    /// this order.
-    pub fn albums(&self) -> &IndexMap<String, Album> {
-        &self.albums
+    /// [`parse`] orders handles by first appearance. Adding fields to an
+    /// existing album does not change its position.
+    pub fn albums(&self) -> impl Iterator<Item = (&str, &Album)> + '_ {
+        self.albums
+            .iter()
+            .map(|(album_handle, album)| (album_handle.as_str(), album))
+    }
+
+    /// Returns the album declared under `album_handle`, if any.
+    ///
+    /// Handles are matched exactly, with no trimming, case folding, or alias
+    /// lookup.
+    pub fn album(&self, album_handle: &str) -> Option<&Album> {
+        self.albums.get(album_handle)
     }
 
     /// The configured album rules, in document order.

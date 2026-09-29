@@ -54,7 +54,9 @@ fn parses_accepted_toml_example() {
     assert_eq!(config.files().include, Some(vec!["lrc".to_string()]));
     assert_eq!(config.files().exclude, None);
     assert_eq!(
-        config.albums()["lateralus"],
+        *config
+            .album("lateralus")
+            .expect("lateralus must be declared"),
         Album {
             name: Some("Lateralus".into()),
             artist: Some("Tool".into()),
@@ -62,7 +64,9 @@ fn parses_accepted_toml_example() {
         }
     );
     assert_eq!(
-        config.albums()["ten_thousand_days"],
+        *config
+            .album("ten_thousand_days")
+            .expect("ten_thousand_days must be declared"),
         Album {
             name: Some("10,000 Days".into()),
             artist: Some("Tool".into()),
@@ -103,7 +107,7 @@ fn minimal_config_defaults_to_music_profile() {
     assert_eq!(config.size_mode(), &SizeMode::Bitrate(128));
     assert_eq!(config.files(), &Files::default());
     assert_eq!(
-        config.albums()["aenima"],
+        *config.album("aenima").expect("aenima must be declared"),
         Album {
             name: Some("Ænima".into()),
             artist: Some("Tool".into()),

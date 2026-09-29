@@ -111,7 +111,7 @@ fn album_rule_can_reference_filesystem_only_album() {
 
     let config = valid(&text);
     assert_eq!(
-        config.albums()["fs_only"],
+        *config.album("fs_only").expect("fs_only must be declared"),
         Album {
             name: None,
             artist: None,
