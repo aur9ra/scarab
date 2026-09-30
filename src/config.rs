@@ -57,8 +57,12 @@ pub enum SizeMode {
 ///
 /// `include` and `exclude` may both be configured. Selection semantics are
 /// not applied by this parser.
+///
+/// Non-exhaustive to allow future fields. Downstream crates can access its
+/// public fields but cannot use struct literals or exhaustive patterns.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[non_exhaustive]
 pub struct Files {
     /// Copy a standalone front cover when one is found.
     pub album_art: Option<bool>,
@@ -79,7 +83,11 @@ pub struct Files {
 /// the caller-supplied default scope. Configured directories describe
 /// recursive candidate scopes and are preserved exactly, including
 /// order, duplicates, and relative/absolute spelling.
+///
+/// Non-exhaustive to allow future fields. Downstream crates can access its
+/// public fields but cannot use struct literals or exhaustive patterns.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Album {
     pub name: Option<String>,
     pub artist: Option<String>,
@@ -101,8 +109,12 @@ struct RawAlbum {
 }
 
 /// A bitrate override applied to every track of one or more declared albums.
+///
+/// Non-exhaustive to allow future fields. Downstream crates can access its
+/// public fields but cannot use struct literals or exhaustive patterns.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[non_exhaustive]
 pub struct AlbumRule {
     #[serde(rename = "albums")]
     pub album_handles: Vec<String>,
@@ -116,12 +128,12 @@ pub struct TrackRuleGroup {
     pub rules: Vec<TrackRule>,
 }
 
-/// A TrackRule is either one or multiple tracks,
-/// along with an action ([`TrackAction`]) to perform
-/// on said tracks ([`TrackTarget`]).
+/// A [`TrackTarget`] and the [`TrackAction`] to apply to it.
 ///
-/// The track names a rule applies to are found in its [`TrackTarget`].
+/// Non-exhaustive to allow future fields. Downstream crates can access its
+/// public fields but cannot use struct literals or exhaustive patterns.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TrackRule {
     pub target: TrackTarget,
     pub action: TrackAction,
@@ -145,20 +157,18 @@ pub enum TrackAction {
     Bitrate(u32),
 }
 
-/// A complete library build configuration produced by [`parse`].
+/// A validated library configuration returned by [`parse`].
 ///
-/// The only public construction path from untrusted config input is
-/// [`parse`], which rejects documents violating config-level
-/// rules.
+/// Validation checks configuration rules only. It does not verify filesystem
+/// resources, album membership, metadata matching, target-size interpretation,
+/// or deferred file-selection policy.
 ///
-/// This does not certify filesystem resources, album membership,
-/// metadata matching, interpreted target-size semantics, or deferred
-/// file-selection policy.
+/// Nested structs expose public fields. [`Files`], [`Album`], [`AlbumRule`],
+/// and [`TrackRule`] are non-exhaustive. Downstream crates can construct
+/// [`TrackRuleGroup`] with a struct literal.
 ///
-/// Nested values remain freely constructible representations,
-/// and are not necessarily by type certified configuration
-/// fragments. Operations relying on config validation must
-/// retain parsed origin.
+/// Keep this aggregate for operations that rely on validation. Detached or
+/// modified nested values do not carry its guarantee of validity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryBuildSpec {
     codec: Codec,

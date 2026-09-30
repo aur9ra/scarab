@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 
-use scarab::{Album, AlbumRule, InvalidLibraryBuildSpec};
+use scarab::InvalidLibraryBuildSpec;
 
 use super::{album_config, invalid, prefixed, rejects_toml, valid};
 
@@ -17,25 +17,22 @@ fn parses_album_rule_with_one_album() {
     let config = valid(&prefixed(
         "[[album_rules]]\nalbums = [\"aenima\"]\nbitrate = 96\n",
     ));
-    assert_eq!(
-        config.album_rules(),
-        &[AlbumRule {
-            album_handles: vec!["aenima".into()],
-            bitrate: 96,
-        }]
-    );
+
+    let rules = config.album_rules();
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].album_handles, ["aenima"]);
+    assert_eq!(rules[0].bitrate, 96);
 }
 
 #[test]
 fn album_rule_applies_to_every_listed_album() {
     let text = "codec = \"opus\"\nbitrate = 128\n[albums.aenima]\nname = \"Ænima\"\nartist = \"Tool\"\n[albums.lateralus]\nname = \"Lateralus\"\nartist = \"Tool\"\n[[album_rules]]\nalbums = [\"aenima\", \"lateralus\"]\nbitrate = 96\n";
-    assert_eq!(
-        valid(text).album_rules(),
-        &[AlbumRule {
-            album_handles: vec!["aenima".into(), "lateralus".into()],
-            bitrate: 96,
-        }]
-    );
+
+    let config = valid(text);
+    let rules = config.album_rules();
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].album_handles, ["aenima", "lateralus"]);
+    assert_eq!(rules[0].bitrate, 96);
 }
 
 #[test]
@@ -110,19 +107,14 @@ fn album_rule_can_reference_filesystem_only_album() {
         + "[[album_rules]]\nalbums = [\"fs_only\"]\nbitrate = 96\n";
 
     let config = valid(&text);
-    assert_eq!(
-        *config.album("fs_only").expect("fs_only must be declared"),
-        Album {
-            name: None,
-            artist: None,
-            directories: Some(vec![PathBuf::from("Undertow")]),
-        }
-    );
-    assert_eq!(
-        config.album_rules(),
-        &[AlbumRule {
-            album_handles: vec!["fs_only".into()],
-            bitrate: 96,
-        }]
-    );
+    let album = config.album("fs_only").expect("fs_only must be declared");
+
+    assert_eq!(album.name, None);
+    assert_eq!(album.artist, None);
+    assert_eq!(album.directories, Some(vec![PathBuf::from("Undertow")]));
+
+    let rules = config.album_rules();
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].album_handles, ["fs_only"]);
+    assert_eq!(rules[0].bitrate, 96);
 }

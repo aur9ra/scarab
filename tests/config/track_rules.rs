@@ -7,7 +7,7 @@
 //! The `[[track_rules]]` arrays: track targeting, actions, and per-group
 //! validation.
 
-use scarab::{InvalidLibraryBuildSpec, TrackAction, TrackRule, TrackRuleGroup, TrackTarget};
+use scarab::{InvalidLibraryBuildSpec, TrackAction, TrackRuleGroup, TrackTarget};
 
 use super::{invalid, prefixed, valid};
 
@@ -26,22 +26,21 @@ fn parses_track_rules() {
     let text = prefixed(
         "[[track_rules]]\nalbum = \"aenima\"\nrules = [{ track = \"Stinkfist\", exclude = true }, { tracks = [\"Eulogy\", \"H.\"], bitrate = 64 }]\n",
     );
+    let config = valid(&text);
+
+    let groups = config.track_rules();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].album_handle, "aenima");
+
+    let rules = &groups[0].rules;
+    assert_eq!(rules.len(), 2);
+    assert_eq!(rules[0].target, TrackTarget::Track("Stinkfist".into()));
+    assert_eq!(rules[0].action, TrackAction::Exclude);
     assert_eq!(
-        valid(&text).track_rules(),
-        &[TrackRuleGroup {
-            album_handle: "aenima".into(),
-            rules: vec![
-                TrackRule {
-                    target: TrackTarget::Track("Stinkfist".into()),
-                    action: TrackAction::Exclude,
-                },
-                TrackRule {
-                    target: TrackTarget::Tracks(vec!["Eulogy".into(), "H.".into()]),
-                    action: TrackAction::Bitrate(64),
-                },
-            ],
-        }]
+        rules[1].target,
+        TrackTarget::Tracks(vec!["Eulogy".into(), "H.".into()])
     );
+    assert_eq!(rules[1].action, TrackAction::Bitrate(64));
 }
 
 #[test]
@@ -144,16 +143,39 @@ fn track_rule_group_can_reference_filesystem_only_album() {
     let text = "codec = \"opus\"\nbitrate = 128\n[albums.fs_only]\ndirectory = \"Undertow\"\n[[track_rules]]\nalbum = \"fs_only\"\nrules = [{ track = \"Intolerance\", exclude = true }]\n";
 
     let config = valid(text);
+    let groups = config.track_rules();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].album_handle, "fs_only");
+    assert_eq!(groups[0].rules.len(), 1);
     assert_eq!(
-        config.track_rules(),
-        &[TrackRuleGroup {
-            album_handle: "fs_only".into(),
-            rules: vec![TrackRule {
-                target: TrackTarget::Track("Intolerance".into()),
-                action: TrackAction::Exclude,
-            }],
-        }]
+        groups[0].rules[0].target,
+        TrackTarget::Track("Intolerance".into())
     );
+    assert_eq!(groups[0].rules[0].action, TrackAction::Exclude);
+}
+
+#[test]
+fn track_rule_group_remains_externally_literal_constructible() {
+    let text = prefixed(
+        "[[track_rules]]\nalbum = \"aenima\"\nrules = [{ track = \"Stinkfist\", exclude = true }]\n",
+    );
+    let config = valid(&text);
+
+    // Downstream code can construct the group and mutate cloned rules.
+    let mut rule = config.track_rules()[0].rules[0].clone();
+    rule.action = TrackAction::Bitrate(96);
+    let regrouped = TrackRuleGroup {
+        album_handle: "aenima".to_string(),
+        rules: vec![rule],
+    };
+
+    assert_eq!(regrouped.album_handle, "aenima");
+    assert_eq!(regrouped.rules.len(), 1);
+    assert_eq!(
+        regrouped.rules[0].target,
+        TrackTarget::Track("Stinkfist".into())
+    );
+    assert_eq!(regrouped.rules[0].action, TrackAction::Bitrate(96));
 }
 
 #[test]

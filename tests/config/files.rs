@@ -7,6 +7,8 @@
 //! The `[files]` table: file selection via `album_art`, `include`,
 //! and `exclude`.
 
+use scarab::Files;
+
 use super::valid;
 
 #[test]
@@ -41,5 +43,21 @@ fn parses_files_include_and_exclude_together() {
         files.include,
         Some(vec!["jpg".to_string(), "png".to_string()])
     );
+    assert_eq!(files.exclude, Some(vec!["cue".to_string()]));
+}
+
+#[test]
+fn default_files_support_ordinary_field_mutation() {
+    let mut files = Files::default();
+    assert_eq!(files.album_art, None);
+    assert_eq!(files.include, None);
+    assert_eq!(files.exclude, None);
+
+    files.album_art = Some(true);
+    files.include = Some(vec!["jpg".to_string()]);
+    files.exclude = Some(vec!["cue".to_string()]);
+
+    assert_eq!(files.album_art, Some(true));
+    assert_eq!(files.include, Some(vec!["jpg".to_string()]));
     assert_eq!(files.exclude, Some(vec!["cue".to_string()]));
 }

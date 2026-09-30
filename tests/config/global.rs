@@ -8,8 +8,7 @@
 //! accepted prototype example.
 
 use scarab::{
-    Album, AlbumRule, Codec, EncodingProfile, Files, InvalidLibraryBuildSpec, SizeMode,
-    TrackAction, TrackRule, TrackRuleGroup, TrackTarget,
+    Codec, EncodingProfile, Files, InvalidLibraryBuildSpec, SizeMode, TrackAction, TrackTarget,
 };
 
 use super::{invalid, prefixed, rejects_toml, valid};
@@ -53,49 +52,42 @@ fn parses_accepted_toml_example() {
     assert_eq!(config.files().album_art, Some(true));
     assert_eq!(config.files().include, Some(vec!["lrc".to_string()]));
     assert_eq!(config.files().exclude, None);
+
+    let lateralus = config
+        .album("lateralus")
+        .expect("lateralus must be declared");
+    assert_eq!(lateralus.name.as_deref(), Some("Lateralus"));
+    assert_eq!(lateralus.artist.as_deref(), Some("Tool"));
+    assert_eq!(lateralus.directories, None);
+
+    let ten_thousand_days = config
+        .album("ten_thousand_days")
+        .expect("ten_thousand_days must be declared");
+    assert_eq!(ten_thousand_days.name.as_deref(), Some("10,000 Days"));
+    assert_eq!(ten_thousand_days.artist.as_deref(), Some("Tool"));
+    assert_eq!(ten_thousand_days.directories, None);
+
+    let album_rules = config.album_rules();
+    assert_eq!(album_rules.len(), 1);
     assert_eq!(
-        *config
-            .album("lateralus")
-            .expect("lateralus must be declared"),
-        Album {
-            name: Some("Lateralus".into()),
-            artist: Some("Tool".into()),
-            directories: None,
-        }
+        album_rules[0].album_handles,
+        ["lateralus", "ten_thousand_days"]
     );
+    assert_eq!(album_rules[0].bitrate, 160);
+
+    let groups = config.track_rules();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].album_handle, "lateralus");
+
+    let rules = &groups[0].rules;
+    assert_eq!(rules.len(), 2);
+    assert_eq!(rules[0].target, TrackTarget::Track("Faaip de Oiad".into()));
+    assert_eq!(rules[0].action, TrackAction::Exclude);
     assert_eq!(
-        *config
-            .album("ten_thousand_days")
-            .expect("ten_thousand_days must be declared"),
-        Album {
-            name: Some("10,000 Days".into()),
-            artist: Some("Tool".into()),
-            directories: None,
-        }
+        rules[1].target,
+        TrackTarget::Tracks(vec!["Parabol".into(), "Parabola".into()])
     );
-    assert_eq!(
-        config.album_rules(),
-        &[AlbumRule {
-            album_handles: vec!["lateralus".into(), "ten_thousand_days".into()],
-            bitrate: 160,
-        }]
-    );
-    assert_eq!(
-        config.track_rules(),
-        &[TrackRuleGroup {
-            album_handle: "lateralus".into(),
-            rules: vec![
-                TrackRule {
-                    target: TrackTarget::Track("Faaip de Oiad".into()),
-                    action: TrackAction::Exclude,
-                },
-                TrackRule {
-                    target: TrackTarget::Tracks(vec!["Parabol".into(), "Parabola".into()]),
-                    action: TrackAction::Bitrate(192),
-                },
-            ],
-        }]
-    );
+    assert_eq!(rules[1].action, TrackAction::Bitrate(192));
 }
 
 #[test]
@@ -106,14 +98,12 @@ fn minimal_config_defaults_to_music_profile() {
     assert_eq!(config.encoding_profile(), EncodingProfile::Music);
     assert_eq!(config.size_mode(), &SizeMode::Bitrate(128));
     assert_eq!(config.files(), &Files::default());
-    assert_eq!(
-        *config.album("aenima").expect("aenima must be declared"),
-        Album {
-            name: Some("Ænima".into()),
-            artist: Some("Tool".into()),
-            directories: None,
-        }
-    );
+
+    let album = config.album("aenima").expect("aenima must be declared");
+    assert_eq!(album.name.as_deref(), Some("Ænima"));
+    assert_eq!(album.artist.as_deref(), Some("Tool"));
+    assert_eq!(album.directories, None);
+
     assert!(config.album_rules().is_empty());
     assert!(config.track_rules().is_empty());
 }

@@ -44,34 +44,27 @@ fn albums_iterate_ordered_handle_album_pairs() {
     let config = valid(text);
 
     let declared: Vec<(&str, &Album)> = config.albums().collect();
+    assert_eq!(declared.len(), 3);
+
+    let (handle, album) = declared[0];
+    assert_eq!(handle, "z");
+    assert_eq!(album.name.as_deref(), Some("Z"));
+    assert_eq!(album.artist, None);
+    assert_eq!(album.directories, Some(vec![PathBuf::from("z")]));
+
+    let (handle, album) = declared[1];
+    assert_eq!(handle, "a");
+    assert_eq!(album.name, None);
+    assert_eq!(album.artist.as_deref(), Some("A"));
+    assert_eq!(album.directories, None);
+
+    let (handle, album) = declared[2];
+    assert_eq!(handle, "m");
+    assert_eq!(album.name, None);
+    assert_eq!(album.artist, None);
     assert_eq!(
-        declared,
-        [
-            (
-                "z",
-                &Album {
-                    name: Some("Z".into()),
-                    artist: None,
-                    directories: Some(vec![PathBuf::from("z")]),
-                },
-            ),
-            (
-                "a",
-                &Album {
-                    name: None,
-                    artist: Some("A".into()),
-                    directories: None,
-                },
-            ),
-            (
-                "m",
-                &Album {
-                    name: None,
-                    artist: None,
-                    directories: Some(vec![PathBuf::from("m1"), PathBuf::from("m2")]),
-                },
-            ),
-        ]
+        album.directories,
+        Some(vec![PathBuf::from("m1"), PathBuf::from("m2")])
     );
 }
 
@@ -148,52 +141,36 @@ fn album_lookup_is_exact() {
 #[test]
 fn parses_optional_metadata_selectors() {
     let name_only = valid(&album_config("name_only", "name = \"Ænima\"\n"));
-    assert_eq!(
-        *name_only
-            .album("name_only")
-            .expect("name_only must be declared"),
-        Album {
-            name: Some("Ænima".into()),
-            artist: None,
-            directories: None,
-        }
-    );
+    let album = name_only
+        .album("name_only")
+        .expect("name_only must be declared");
+    assert_eq!(album.name.as_deref(), Some("Ænima"));
+    assert_eq!(album.artist, None);
+    assert_eq!(album.directories, None);
 
     let artist_only = valid(&album_config("artist_only", "artist = \"Tool\"\n"));
-    assert_eq!(
-        *artist_only
-            .album("artist_only")
-            .expect("artist_only must be declared"),
-        Album {
-            name: None,
-            artist: Some("Tool".into()),
-            directories: None,
-        }
-    );
+    let album = artist_only
+        .album("artist_only")
+        .expect("artist_only must be declared");
+    assert_eq!(album.name, None);
+    assert_eq!(album.artist.as_deref(), Some("Tool"));
+    assert_eq!(album.directories, None);
 
     let empty_name = valid(&album_config("empty_name", "name = \"\"\n"));
-    assert_eq!(
-        *empty_name
-            .album("empty_name")
-            .expect("empty_name must be declared"),
-        Album {
-            name: Some(String::new()),
-            artist: None,
-            directories: None,
-        }
-    );
+    let album = empty_name
+        .album("empty_name")
+        .expect("empty_name must be declared");
+    assert_eq!(album.name.as_deref(), Some(""));
+    assert_eq!(album.artist, None);
+    assert_eq!(album.directories, None);
 
     let empty_artist = valid(&album_config("empty_artist", "artist = \"\"\n"));
-    assert_eq!(
-        *empty_artist
-            .album("empty_artist")
-            .expect("empty_artist must be declared"),
-        Album {
-            name: None,
-            artist: Some(String::new()),
-            directories: None,
-        }
-    );
+    let album = empty_artist
+        .album("empty_artist")
+        .expect("empty_artist must be declared");
+    assert_eq!(album.name, None);
+    assert_eq!(album.artist.as_deref(), Some(""));
+    assert_eq!(album.directories, None);
 }
 
 #[test]
@@ -209,54 +186,41 @@ fn album_metadata_values_are_preserved_exactly() {
     );
 
     let with_artist = valid(&album_config("blank", "name = \"\"\nartist = \"  \"\n"));
-    assert_eq!(
-        *with_artist.album("blank").expect("blank must be declared"),
-        Album {
-            name: Some(String::new()),
-            artist: Some("  ".into()),
-            directories: None,
-        }
-    );
+    let album = with_artist.album("blank").expect("blank must be declared");
+    assert_eq!(album.name.as_deref(), Some(""));
+    assert_eq!(album.artist.as_deref(), Some("  "));
+    assert_eq!(album.directories, None);
 
     let with_directory = valid(&album_config(
         "blank",
         "name = \"\"\ndirectory = \"Undertow\"\n",
     ));
-    assert_eq!(
-        *with_directory
-            .album("blank")
-            .expect("blank must be declared"),
-        Album {
-            name: Some(String::new()),
-            artist: None,
-            directories: Some(vec![PathBuf::from("Undertow")]),
-        }
-    );
+    let album = with_directory
+        .album("blank")
+        .expect("blank must be declared");
+    assert_eq!(album.name.as_deref(), Some(""));
+    assert_eq!(album.artist, None);
+    assert_eq!(album.directories, Some(vec![PathBuf::from("Undertow")]));
 }
 
 #[test]
 fn parses_filesystem_only_albums() {
     let singular = valid(&album_config("fs_only", "directory = \"Undertow\"\n"));
-    assert_eq!(
-        *singular.album("fs_only").expect("fs_only must be declared"),
-        Album {
-            name: None,
-            artist: None,
-            directories: Some(vec![PathBuf::from("Undertow")]),
-        }
-    );
+    let album = singular.album("fs_only").expect("fs_only must be declared");
+    assert_eq!(album.name, None);
+    assert_eq!(album.artist, None);
+    assert_eq!(album.directories, Some(vec![PathBuf::from("Undertow")]));
 
     let plural = valid(&album_config(
         "fs_only",
         "directories = [\"Disc 1\", \"Disc 2\"]\n",
     ));
+    let album = plural.album("fs_only").expect("fs_only must be declared");
+    assert_eq!(album.name, None);
+    assert_eq!(album.artist, None);
     assert_eq!(
-        *plural.album("fs_only").expect("fs_only must be declared"),
-        Album {
-            name: None,
-            artist: None,
-            directories: Some(vec![PathBuf::from("Disc 1"), PathBuf::from("Disc 2")]),
-        }
+        album.directories,
+        Some(vec![PathBuf::from("Disc 1"), PathBuf::from("Disc 2")])
     );
 }
 
@@ -266,13 +230,12 @@ fn parses_metadata_with_filesystem_selectors() {
         "mixed",
         "name = \"Lateralus\"\nartist = \"Tool\"\ndirectories = [\"Disc 1\", \"Disc 2\"]\n",
     ));
+    let album = config.album("mixed").expect("mixed must be declared");
+    assert_eq!(album.name.as_deref(), Some("Lateralus"));
+    assert_eq!(album.artist.as_deref(), Some("Tool"));
     assert_eq!(
-        *config.album("mixed").expect("mixed must be declared"),
-        Album {
-            name: Some("Lateralus".into()),
-            artist: Some("Tool".into()),
-            directories: Some(vec![PathBuf::from("Disc 1"), PathBuf::from("Disc 2")]),
-        }
+        album.directories,
+        Some(vec![PathBuf::from("Disc 1"), PathBuf::from("Disc 2")])
     );
 }
 
@@ -282,16 +245,12 @@ fn singular_and_one_element_plural_forms_are_equivalent() {
     let plural = valid(&album_config("undertow", "directories = [\"Undertow\"]\n"));
 
     assert_eq!(singular, plural);
-    assert_eq!(
-        *singular
-            .album("undertow")
-            .expect("undertow must be declared"),
-        Album {
-            name: None,
-            artist: None,
-            directories: Some(vec![PathBuf::from("Undertow")]),
-        }
-    );
+    let album = singular
+        .album("undertow")
+        .expect("undertow must be declared");
+    assert_eq!(album.name, None);
+    assert_eq!(album.artist, None);
+    assert_eq!(album.directories, Some(vec![PathBuf::from("Undertow")]));
 }
 
 #[test]
