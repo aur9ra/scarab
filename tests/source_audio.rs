@@ -4,7 +4,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! Integration tests for source-audio candidate classification.
+//! Integration tests for lexical, filepath-based source-audio classification.
 //!
 //! Because the classifier operates on a lexical basis, these tests do not
 //! need to touch the filesystem; therefore no real media, fixture copying,

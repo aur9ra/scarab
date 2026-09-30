@@ -4,32 +4,30 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! Parsing and validation of Scarab's TOML configuration, discovery of
-//! source files under a source root, recognition of source-audio candidates
-//! among source files, probing of source files with ffprobe, and
-//! resolution of one explicit configured album-directory selector.
+//! Parsing and validation of Scarab's TOML configuration, filesystem discovery
+//! and scope preparation, candidate inventory, source-audio classification,
+//! ffprobe metadata probing, and album-directory resolution.
 //!
 //! [`parse`] deserializes TOML text into the validated [`LibraryBuildSpec`]
 //! model or reports the first problem it finds. Ambiguity, such as a rule
 //! applied twice, is rejected instead of being decided by declaration order.
 //!
-//! Albums declare optional metadata selectors and an optional
-//! filesystem candidate scope.
+//! Albums may declare metadata selectors and optional directory selectors.
 //!
-//! [`discover_source_files`] recursively collects every ordinary file under
-//! one source root. [`classify_source_audio`] recognizes whether
-//! one supplied pathname names a supported source-audio format by its final
-//! extension. [`probe_source_file`] describes one supplied source file by
-//! invoking ffprobe. [`resolve_album_directory`] resolves one configured
-//! album directory against one source root and returns its resolved path after
-//! confirming it is a directory. The private `album_scope` module applies
-//! this resolver to configured selectors and prepares the shared default root
-//! for albums without selectors. `required_discovery` scans each prepared
-//! scope, and [`build_candidate_inventory`] combines both steps into a
-//! filesystem candidate inventory.
+//! [`discover_source_files`] recursively collects ordinary files under one
+//! source root. [`resolve_album_directory`] resolves one configured directory
+//! selector against a source root and verifies its target is a directory. The
+//! private `album_scope` module prepares configured directory-selector scopes.
+//! Declarations without directory selectors share one default source-root scope,
+//! if any. `required_discovery` scans prepared scopes, and [`build_candidate_inventory`]
+//! combines scope preparation with required discovery into an inventory of
+//! observed filesystem pathnames.
 //!
-//! Discovery, candidate recognition, and probing are not yet connected into a
-//! single pipeline.
+//! [`classify_source_audio`] recognizes Scarab's source-audio formats from a
+//! supplied path's final extension. [`probe_source_file`] requests ffprobe
+//! format metadata for its supplied path and requires no prior classification.
+//! Discovery, classification, and probing are distinct capabilities. None
+//! establishes album membership.
 
 mod album_directory;
 mod album_scope;

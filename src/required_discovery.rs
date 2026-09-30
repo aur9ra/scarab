@@ -57,7 +57,7 @@ pub(crate) struct ConfiguredScopeCoverage {
 /// The shared default scope and files found under its resolved root.
 #[derive(Debug)]
 pub(crate) struct DefaultScopeCoverage {
-    /// Prepared scope and dependent albums.
+    /// Prepared scope and album declarations that require it.
     pub(crate) scope: crate::album_scope::DefaultSourceRootScope,
     /// Files found under the resolved traversal root.
     pub(crate) files: Vec<PathBuf>,
@@ -84,7 +84,7 @@ pub(crate) struct ConfiguredScopeFailure {
 /// The shared default scope and its discovery error.
 #[derive(Debug)]
 pub(crate) struct DefaultScopeFailure {
-    /// Affected scope and dependent albums.
+    /// Affected scope and album declarations that require it.
     pub(crate) scope: crate::album_scope::DefaultSourceRootScope,
     /// Original discovery error.
     pub(crate) error: DiscoveryError,

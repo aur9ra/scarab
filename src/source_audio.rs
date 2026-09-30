@@ -4,18 +4,16 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! Filepath-based recognition of source-audio candidates among ordinary files.
+//! Lexical, filepath-based recognition of Scarab's source-audio formats.
 //!
-//! [`classify_source_audio`] inspects a path's final extension and
-//! reports whether the pathname names a supported source-audio candidate.
-//! A `Some<SourceAudioFormat>` result means the pathname is a supported candidate
-//! for later `ffprobe` probing.
+//! [`classify_source_audio`] recognizes a supplied path by its final extension.
+//! The path is not required to have come from discovery or inventory.
 //!
-//! The classifier performs no filesystem, process, or configuration
-//! access of any kind, never canonicalizes or rewrites paths,
-//! and does not enforce that its input came from discovery, therefore
-//! it is unable to certify that the file exists, contains audio,
-//! or is readable. These are steps for future stages of the pipeline.
+//! Classification does not establish existence, ordinary-file status, readability,
+//! valid media, probe success, album membership, logical-track identity, or output selection.
+//!
+//! The classifier performs no filesystem, process, or configuration access and
+//! never canonicalizes or rewrites paths.
 
 use std::ffi::OsStr;
 use std::path::Path;
@@ -27,16 +25,16 @@ pub enum SourceAudioFormat {
     Flac,
 }
 
-/// Recognizes a pathname as a supported source-audio candidate. Compares
-/// ASCII-case-insensitively.
+/// Recognizes a Scarab-supported source-audio format from a pathname's
+/// final extension. Compares ASCII-case-insensitively.
 ///
 /// The path is never searched as a substring. Only the final extension is
 /// examined, using [`Path::extension`], so a bare dotfile such
 /// as `.flac` has no extension and returns [`None`], while `.hidden.flac`
 /// returns [`SourceAudioFormat::Flac`]. A non-UTF-8 basename with an ordinary
 /// ASCII extension remains eligible. Existence, file type, contents, and
-/// metadata are never inspected, so a nonexistent `missing.flac` is still a
-/// candidate.
+/// metadata are never inspected, so even a nonexistent `missing.flac` is
+/// recognized purely from its extension.
 pub fn classify_source_audio(path: &Path) -> Option<SourceAudioFormat> {
     let extension = path.extension()?;
     is_flac_extension(extension).then_some(SourceAudioFormat::Flac)
@@ -128,8 +126,7 @@ mod tests {
         );
     }
 
-    /// This test is to pass because probing should flag this file as
-    /// non-existent later in the pipeline.
+    /// Recognition depends on the final extension, not whether the path exists.
     #[test]
     fn accepts_nonexistent_flac_named_path() {
         assert_eq!(

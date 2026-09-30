@@ -4,22 +4,22 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! Builds filesystem scopes for albums in a validated library build spec.
+//! Builds filesystem scopes from directory selectors in a validated library build spec.
 //!
-//! Relative selectors use the supplied source root, absolute selectors ignore
-//! it. Selectors are grouped by resolved path within each album. Multiple
-//! selectors for one path produce one warning per group. Albums without
-//! selectors (as in, metadata-selecting albums) share one prepared
-//! source-root scope.
+//! Relative directory selectors use the supplied source root. Absolute
+//! selectors ignore it. Selectors are grouped by resolved path within each
+//! album declaration. Multiple selectors for one path produce one warning per
+//! group. Declarations without directory selectors (such as those with
+//! metadata selectors) share one prepared source-root scope.
 //!
 //! Relative selectors always use the original source root, not the prepared
-//! default root. Scopes never merge across albums or between configured and
-//! default roots. Preparation returns scopes only if every required resolution
-//! succeeds; otherwise it returns failures and any warnings from successful
-//! groups.
+//! default root. Configured scopes from separate declarations remain separate,
+//! as do configured scopes and the default scope. Preparation returns scopes
+//! only if every required resolution succeeds, otherwise it returns failures
+//! and any warnings from successful groups.
 //!
 //! This module only inspects paths. It does not modify the source tree, find
-//! files, or decide which album owns them.
+//! files, or assign album membership to discovered files.
 
 use std::fs;
 use std::io;
@@ -54,14 +54,15 @@ pub(crate) enum AlbumScopePreparation {
 pub(crate) struct PreparedAlbumScopes {
     /// Configured scopes in album and first-selector order.
     pub(crate) configured_directory_scopes: Vec<ConfiguredDirectoryScope>,
-    /// Shared by albums without configured selectors, if any.
+    /// Shared by declarations without configured directory selectors, if any.
     pub(crate) default_source_root_scope: Option<DefaultSourceRootScope>,
 }
 
-/// One group of selectors in an album that resolved to the same path.
+/// One group of directory selectors in an album declaration that resolved to
+/// the same path.
 #[derive(Debug)]
 pub(crate) struct ConfiguredDirectoryScope {
-    /// Album that owns this scope.
+    /// Album declaration for which this scope is required.
     pub(crate) album_handle: String,
     /// Resolved path shared by this group.
     pub(crate) resolved_directory: PathBuf,
@@ -69,25 +70,26 @@ pub(crate) struct ConfiguredDirectoryScope {
     pub(crate) contributing_selectors: Vec<PathBuf>,
 }
 
-/// One configured selector occurrence that failed to resolve.
+/// One configured directory-selector occurrence that failed to resolve.
 #[derive(Debug)]
 pub(crate) struct ConfiguredSelectorFailure {
-    /// Album that owns the failed selector.
+    /// Album declaration containing the failed selector.
     pub(crate) album_handle: String,
-    /// Selector spelling from the configuration.
+    /// Directory-selector spelling from the configuration.
     pub(crate) configured_selector: PathBuf,
     /// Error returned by the resolver.
     pub(crate) error: io::Error,
 }
 
-/// One source-root scope shared by albums without selectors.
+/// One source-root scope shared by declarations without directory selectors.
 #[derive(Debug)]
 pub(crate) struct DefaultSourceRootScope {
     /// Source-root spelling supplied by the caller.
     pub(crate) original_source_root: PathBuf,
     /// Resolved path for later filesystem work.
     pub(crate) resolved_traversal_root: PathBuf,
-    /// Albums that use this scope, in declaration order.
+    /// Album declarations without directory selectors that require this scope,
+    /// in declaration order.
     pub(crate) dependent_album_handles: Vec<String>,
 }
 
@@ -96,7 +98,8 @@ pub(crate) struct DefaultSourceRootScope {
 pub(crate) struct DefaultSourceRootFailure {
     /// Source-root spelling supplied by the caller.
     pub(crate) original_source_root: PathBuf,
-    /// Albums affected by the failure, in declaration order.
+    /// Album declarations without directory selectors requiring this scope, in
+    /// declaration order.
     pub(crate) dependent_album_handles: Vec<String>,
     /// Reason preparation failed.
     pub(crate) kind: DefaultSourceRootFailureKind,
@@ -128,7 +131,8 @@ pub(crate) enum DefaultSourceRootFailureKind {
     },
 }
 
-/// Warning that several selectors in an album resolved to the same path.
+/// Warning that several directory selectors in an album declaration resolved
+/// to the same path.
 #[derive(Debug)]
 pub(crate) struct RedundancyWarning {
     /// Album with redundant selectors.
@@ -141,16 +145,16 @@ pub(crate) struct RedundancyWarning {
 
 /// Prepares filesystem scopes for albums in `spec` using `source_root`.
 ///
-/// Each configured selector is resolved independently, in album and selector
-/// order. Relative selectors use the supplied root, absolute selectors ignore
-/// it. Selectors that resolve to the same path are grouped within their album,
-/// groups with multiple selectors produce one warning. Failures are collected and
-/// do not stop preparation.
+/// Each configured directory selector is resolved independently, in album and
+/// selector order. Relative selectors use the supplied root, absolute selectors
+/// ignore it. Selectors that resolve to the same path are grouped within their
+/// declaration. Groups with multiple selectors produce one warning. Failures
+/// are collected and do not stop preparation.
 ///
-/// If any album has no configured selectors, the root is resolved once and
-/// shared by all albums with no configured selectors.
+/// If any album declaration has no configured directory selector, the root is
+/// resolved once and shared by those declarations.
 ///
-/// Configured selectors and the default root are checked even if one fails.
+/// Configured directory selectors and the default root are checked even if one fails.
 /// Scopes are returned only if all required resolutions succeed, otherwise the
 /// result contains the failures and any warnings from successful groups.
 pub(crate) fn prepare_album_scopes(

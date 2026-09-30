@@ -12,7 +12,8 @@
 //! entry types, never at file extensions or contents.
 //!
 //! Discovery does not resolve or validate album filesystem declarations.
-//! Selecting albums per file is not part of this walk.
+//! Album membership assignment is not a responsibility or within the
+//! scope of this walk.
 //!
 //! Symlink handling is asymmetric:
 //! - A terminal symlink in the supplied root's own pathname is rejected.

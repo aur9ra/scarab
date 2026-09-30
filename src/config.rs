@@ -74,15 +74,14 @@ pub struct Files {
 
 /// Optional selectors for one declared album.
 ///
-/// `name` and `artist` are optional, independent metadata predicates.
-/// Supplied values are preserved exactly.
+/// `name` and `artist` are optional, independent metadata selectors. Supplied
+/// values are preserved exactly.
 ///
-/// `directories` is the collapsed filesystem candidate scope from the
-/// `directory` or `directories` configuration fields. `None` means no
-/// filesystem scope was configured, in which case future resolution uses
-/// the caller-supplied default scope. Configured directories describe
-/// recursive candidate scopes and are preserved exactly, including
-/// order, duplicates, and relative/absolute spelling.
+/// `directories` stores the directory selector or selectors from the
+/// `directory` or `directories` configuration fields. `None` means no directory
+/// selector was configured, so scope preparation uses the caller-supplied
+/// shared default source root. Configured selector values are preserved exactly,
+/// including order, duplicates, and relative/absolute spelling.
 ///
 /// Non-exhaustive to allow future fields. Downstream crates can access its
 /// public fields but cannot use struct literals or exhaustive patterns.

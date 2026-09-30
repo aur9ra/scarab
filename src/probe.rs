@@ -4,11 +4,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! Probing source files with ffprobe.
+//! Obtaining source-file format metadata with `ffprobe`.
 //!
-//! [`probe_source_file`] invokes `ffprobe` on a supplied path and
-//! returns its format metadata. Whether ffprobe can read the
-//! input is ffprobe's own decision - Scarab forwards the path untouched.
+//! [`probe_source_file`] requests format duration and tags for a supplied path
+//! using `ffprobe`. No prior source-audio classification is required.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -21,12 +20,15 @@ use serde::Deserialize;
 /// The ffprobe executable Scarab invokes. Looked up on `PATH` by name.
 const FFPROBE: &str = "ffprobe";
 
-/// Probes one source file with ffprobe and returns its metadata.
+/// Requests format duration and tags from ffprobe for the supplied path.
 ///
-/// The supplied path is passed to ffprobe exactly as given and is copied
-/// unchanged into the result: it is never canonicalized, absolutized, or
-/// otherwise rewritten. A path ffprobe cannot open is reported as
-/// [`ProbeError::Exit`] together with ffprobe's stderr diagnostics.
+/// The path is passed unchanged and stored unchanged. It is never
+/// canonicalized, absolutized, or otherwise rewritten. Success means ffprobe
+/// exited successfully and returned the requested JSON format metadata.
+///
+/// It does not classify the path, establish album membership, identify or finalize
+/// a logical track, or determine output inclusion. No prior classification is
+/// required.
 pub fn probe_source_file(path: &Path) -> Result<ProbedSourceFile, ProbeError> {
     let output = Command::new(FFPROBE)
         .args([
@@ -60,15 +62,15 @@ pub fn probe_source_file(path: &Path) -> Result<ProbedSourceFile, ProbeError> {
     })
 }
 
-/// ffprobe's view of one source file.
+/// The requested ffprobe format representation for a supplied path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbedSourceFile {
-    /// The unmodified path passed to [`probe_source_file`].
+    /// The exact path passed to [`probe_source_file`].
     pub path: PathBuf,
-    /// The format tags ffprobe reported, with keys and values exactly as
-    /// reported. A missing tags field yields an empty map.
+    /// Format tags with keys and values as reported by ffprobe. A missing tags
+    /// field yields an empty map.
     pub tags: BTreeMap<String, String>,
-    /// The format duration ffprobe reported, if any.
+    /// Format duration parsed from ffprobe's decimal-seconds value, if present.
     pub duration: Option<Duration>,
 }
 
@@ -85,8 +87,8 @@ pub enum ProbeError {
         /// The process's stderr diagnostics.
         stderr: String,
     },
-    /// ffprobe succeeded (status code 0) but its JSON
-    /// response shape could not be deserialized.
+    /// ffprobe exited successfully, but its JSON response did not match the
+    /// required format representation.
     Response(serde_json::Error),
 }
 
@@ -114,8 +116,8 @@ impl std::error::Error for ProbeError {
     }
 }
 
-/// An ffprobe response. The format object is required, only fields
-/// inside it are optional: tags defaultly initializes to an empty [`BTreeMap`].
+/// An ffprobe response with a required `format` object. Fields inside it are
+/// optional. Missing tags default to an empty map.
 #[derive(Deserialize)]
 struct FfprobeResponse {
     format: FfprobeFormatEntry,
@@ -131,8 +133,8 @@ struct FfprobeFormatEntry {
 }
 
 /// Deserializes an ffprobe duration reported as decimal seconds. A missing or
-/// null field means no duration. Any other unparseable value is a
-/// deserialization error.
+/// null field means no duration. A non-string, unparseable, or out-of-range
+/// value is a deserialization error.
 fn duration_from_seconds<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
 where
     D: serde::Deserializer<'de>,

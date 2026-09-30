@@ -4,7 +4,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! Inventory of ordinary files observed under required album scopes.
+//! Inventory of ordinary files observed under required filesystem scopes.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -22,17 +22,18 @@ use crate::required_discovery::{RequiredDiscovery, discover_required_files};
 /// diagnostics without a partial inventory.
 ///
 /// Equal paths under native `Path` equality share a candidate. Each retains
-/// one observed pathname and every distinct scope that reported it. Candidate,
-/// scope, and association iteration order is unspecified. Ordering within
-/// scope descriptions and diagnostics is preserved.
+/// one actually observed pathname and every distinct scope that reported it.
+/// Candidate, scope, and association iteration order is unspecified.
+/// Ordering within scope descriptions and diagnostics is preserved.
 ///
 /// Successful inventories include every required scope, even empty ones.
 /// Coverage records completed scans, not ongoing filesystem validity, and a
 /// scope association does not establish album membership.
 ///
-/// This does not classify or probe files, interpret metadata, determine album
-/// membership, or plan output. Other configuration does not filter candidates,
-/// and it does not alter file contents or directory entries.
+/// This inventory does not classify or probe files, establish media validity,
+/// interpret metadata, assign album membership or logical-track identity, or
+/// select or plan output. Other configuration does not filter candidates.
+/// Building the inventory does not alter file contents or directory entries.
 // Owned diagnostics make this error larger than Clippy's default threshold.
 #[allow(clippy::result_large_err)]
 pub fn build_candidate_inventory(
@@ -120,7 +121,8 @@ impl CandidateInventory {
     }
 }
 
-/// One distinct observed pathname and its reporting scopes.
+/// One distinct ordinary pathname observed by required-scope discovery and
+/// its reporting scopes.
 #[derive(Debug)]
 pub struct Candidate<'inventory> {
     path: &'inventory Path,
@@ -149,27 +151,29 @@ impl<'inventory> Candidate<'inventory> {
 /// It appears in `covered_scopes` only after all required scans succeed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequiredScope {
-    /// One configured selector group for an album.
+    /// One configured directory-selector group required by an album declaration.
     ConfiguredDirectory {
-        /// Album that owns this scope.
+        /// Album declaration for which this scope is required.
         album_handle: String,
         /// Resolved path for this group.
         resolved_directory: PathBuf,
         /// Selector spellings in declaration order, including duplicates.
         contributing_selectors: Vec<PathBuf>,
     },
-    /// Shared root for albums without selectors.
+    /// Shared root for declarations without configured directory selectors.
     DefaultSourceRoot {
         /// Source-root spelling supplied by the caller.
         original_source_root: PathBuf,
         /// Resolved path used for scanning.
         resolved_traversal_root: PathBuf,
-        /// Albums that use this scope, in declaration order.
+        /// Album declarations without directory selectors that require this
+        /// scope, in declaration order.
         dependent_album_handles: Vec<String>,
     },
 }
 
-/// Configured selectors in one album that resolve to the same directory.
+/// Configured directory selectors in one album declaration that resolve to
+/// the same directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RedundantConfiguredSelectors {
     /// Album with redundant selectors.
@@ -185,7 +189,7 @@ pub struct RedundantConfiguredSelectors {
 pub enum CandidateInventoryFailure {
     /// Preparation failed; discovery did not run.
     Preparation {
-        /// Selector failures in album and selector order.
+        /// Directory-selector failures in declaration and selector order.
         configured_failures: Vec<ConfiguredSelectorFailure>,
         /// Failure of the shared default root, if needed.
         default_source_root_failure: Option<DefaultSourceRootFailure>,
@@ -246,12 +250,12 @@ impl std::error::Error for CandidateInventoryFailure {
     }
 }
 
-/// A configured selector that failed to resolve.
+/// A configured directory selector that failed to resolve.
 #[derive(Debug)]
 pub struct ConfiguredSelectorFailure {
     /// Album that owns the failed selector.
     pub album_handle: String,
-    /// Selector spelling from the configuration.
+    /// Directory-selector spelling from the configuration.
     pub configured_selector: PathBuf,
     /// Error returned by the resolver.
     pub error: io::Error,
@@ -262,7 +266,8 @@ pub struct ConfiguredSelectorFailure {
 pub struct DefaultSourceRootFailure {
     /// Source-root spelling supplied by the caller.
     pub original_source_root: PathBuf,
-    /// Albums affected by the failure, in declaration order.
+    /// Album declarations without directory selectors requiring this scope, in
+    /// declaration order.
     pub dependent_album_handles: Vec<String>,
     /// Reason preparation failed.
     pub kind: DefaultSourceRootFailureKind,
