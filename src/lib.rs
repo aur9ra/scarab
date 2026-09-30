@@ -6,7 +6,7 @@
 
 //! Parsing and validation of Scarab's TOML configuration, discovery of
 //! source files under a source root, recognition of source-audio candidates
-//! among source files, probing of source audio files with ffprobe, and
+//! among source files, probing of source files with ffprobe, and
 //! resolution of one explicit configured album-directory selector.
 //!
 //! [`parse`] deserializes TOML text into the validated [`LibraryBuildSpec`]
@@ -19,7 +19,7 @@
 //! [`discover_source_files`] recursively collects every ordinary file under
 //! one source root. [`classify_source_audio`] recognizes whether
 //! one supplied pathname names a supported source-audio format by its final
-//! extension. [`probe_track`] describes one supplied source file by
+//! extension. [`probe_source_file`] describes one supplied source file by
 //! invoking ffprobe. [`resolve_album_directory`] resolves one configured
 //! album directory against one source root and returns its resolved path after
 //! confirming it is a directory. The private `album_scope` module applies
@@ -54,5 +54,5 @@ pub use config::{
     LibraryBuildSpecError, SizeMode, TrackAction, TrackRule, TrackRuleGroup, TrackTarget, parse,
 };
 pub use discovery::{DiscoveryError, discover_source_files};
-pub use probe::{ProbeError, ProbedTrack, probe_track};
+pub use probe::{ProbeError, ProbedSourceFile, probe_source_file};
 pub use source_audio::{SourceAudioFormat, classify_source_audio};

@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
-use scarab::{ProbeError, ProbedTrack, probe_track};
+use scarab::{ProbeError, ProbedSourceFile, probe_source_file};
 
 mod common;
 
@@ -96,9 +96,9 @@ fn tag_map(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
 /// Captures the source file, probes it, asserts the captured source is
 /// unchanged, then returns the probe result unchanged so callers inspect the
 /// result only after the immutability check has completed.
-fn probe_track_checked(path: &Path) -> Result<ProbedTrack, ProbeError> {
+fn probe_source_file_checked(path: &Path) -> Result<ProbedSourceFile, ProbeError> {
     let snapshot = SourceFileSnapshot::capture(path);
-    let result = probe_track(path);
+    let result = probe_source_file(path);
     snapshot.assert_unchanged();
     result
 }
@@ -112,7 +112,7 @@ fn probes_every_committed_fixture() {
     for (file_path, expected_duration, expected_tags) in FIXTURES {
         let copied = library.join(file_path);
 
-        let probed = probe_track_checked(&copied)
+        let probed = probe_source_file_checked(&copied)
             .unwrap_or_else(|error| panic!("probing {} failed: {error}", copied.display()));
 
         assert_eq!(probed.path, copied);
@@ -141,7 +141,7 @@ fn preserves_exact_path() {
     );
 
     if let Some(relative) = &relative {
-        let probed = probe_track_checked(relative)
+        let probed = probe_source_file_checked(relative)
             .unwrap_or_else(|error| panic!("probing {} failed: {error}", relative.display()));
         // Raw OS-string comparison: path equality is component-normalized,
         // so it would not distinguish a preserved spelling from a rewritten one.
@@ -153,7 +153,7 @@ fn preserves_exact_path() {
     let base = relative.unwrap_or(copied);
     let redundant = redundant_dot_spelling(&base);
 
-    let probed = probe_track_checked(&redundant)
+    let probed = probe_source_file_checked(&redundant)
         .unwrap_or_else(|error| panic!("probing {} failed: {error}", redundant.display()));
     // Raw OS-string comparison: path equality is component-normalized, so the
     // redundant `./` component must be checked as spelled.
@@ -172,9 +172,9 @@ fn nonexistent_path_reports_failed_probe_process() {
         missing.display()
     );
 
-    // A nonexistent source has nothing to snapshot, so probe_track is
+    // A nonexistent source has nothing to snapshot, so probe_source_file is
     // invoked directly without the checked wrapper.
-    match probe_track(&missing) {
+    match probe_source_file(&missing) {
         Err(ProbeError::Exit { status, stderr }) => {
             assert!(!status.success());
             assert!(

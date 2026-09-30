@@ -6,7 +6,7 @@
 
 //! Probing source files with ffprobe.
 //!
-//! [`probe_track`] invokes `ffprobe` on a supplied path and
+//! [`probe_source_file`] invokes `ffprobe` on a supplied path and
 //! returns its format metadata. Whether ffprobe can read the
 //! input is ffprobe's own decision - Scarab forwards the path untouched.
 
@@ -27,7 +27,7 @@ const FFPROBE: &str = "ffprobe";
 /// unchanged into the result: it is never canonicalized, absolutized, or
 /// otherwise rewritten. A path ffprobe cannot open is reported as
 /// [`ProbeError::Exit`] together with ffprobe's stderr diagnostics.
-pub fn probe_track(path: &Path) -> Result<ProbedTrack, ProbeError> {
+pub fn probe_source_file(path: &Path) -> Result<ProbedSourceFile, ProbeError> {
     let output = Command::new(FFPROBE)
         .args([
             "-v",
@@ -53,7 +53,7 @@ pub fn probe_track(path: &Path) -> Result<ProbedTrack, ProbeError> {
     let response =
         serde_json::from_slice::<FfprobeResponse>(&output.stdout).map_err(ProbeError::Response)?;
 
-    Ok(ProbedTrack {
+    Ok(ProbedSourceFile {
         path: path.to_path_buf(),
         tags: response.format.tags,
         duration: response.format.duration,
@@ -62,8 +62,8 @@ pub fn probe_track(path: &Path) -> Result<ProbedTrack, ProbeError> {
 
 /// ffprobe's view of one source file.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProbedTrack {
-    /// The unmodified path passed to [`probe_track`].
+pub struct ProbedSourceFile {
+    /// The unmodified path passed to [`probe_source_file`].
     pub path: PathBuf,
     /// The format tags ffprobe reported, with keys and values exactly as
     /// reported. A missing tags field yields an empty map.
