@@ -36,8 +36,8 @@ Work sharing during coverage cannot hide a failure in required coverage or erase
 
 ## Membership and output policy
 
-Membership combines the applicable candidate scope with every exact metadata predicate when supplied. Multiple configured directories contribute a candidate union, and directory-only membership is valid. Overlapping scopes are allowed, but actual ambiguous membership blocks rather than assigning a file to an album by first-wins or declaration-order precedence.
+Membership combines the applicable candidate scope with every exact metadata predicate when supplied. Multiple configured directories contribute a candidate union, and directory-only membership is valid. A source pathname may belong to several configured collections; this is valid and does not itself create ambiguity or an ownership conflict. No first-wins or declaration-order rule assigns the pathname to a collection.
 
 Global -> album -> track overrides are explicit policy. Conflicting rules at the same precedence level block rather than being resolved by declaration order. Missing or ambiguous encoding requirements block encoding. Core logic does not prompt on stdin to resolve such requirements.
 
-Positive source-audio classification reserves the source-audio role for that pathname. Probe failure, membership nonmatch/ambiguity, or output exclusion does not reopen auxiliary-file handling. Auxiliary-file selection does not establish album membership or expand album scopes.
+Positive source-audio classification reserves the source-audio role for that pathname. Probe failure, membership non-match, or output exclusion does not reopen auxiliary-file handling. Auxiliary-file selection does not establish album membership or expand album scopes.

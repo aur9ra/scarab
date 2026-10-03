@@ -21,7 +21,9 @@
 //! Declarations without directory selectors share one default source-root scope,
 //! if any. `required_discovery` scans prepared scopes, and [`build_candidate_inventory`]
 //! combines scope preparation with required discovery into an inventory of
-//! observed filesystem pathnames.
+//! observed filesystem pathnames. The private `collection_membership` module
+//! derives directory-only membership from a completed inventory for
+//! declarations without metadata selectors.
 //!
 //! [`classify_source_audio`] recognizes Scarab's source-audio formats from a
 //! supplied path's final extension. [`probe_source_file`] requests ffprobe
@@ -32,6 +34,7 @@
 mod album_directory;
 mod album_scope;
 mod candidate_inventory;
+mod collection_membership;
 mod config;
 mod discovery;
 mod probe;
