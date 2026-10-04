@@ -5,16 +5,16 @@
  */
 
 //! Directory-only membership for configured collections from a completed
-//! candidate inventory.
+//! observed source file inventory.
 //!
-//! An album declaration defines a user-configured collection. Each source-audio
-//! candidate reported by one of the collection's configured directory scopes is
-//! a member.
+//! An album declaration defines a user-configured collection. An observed
+//! source file is a member when it is classified as source audio and one of
+//! the collection's configured directory scopes reports it.
 //!
-//! Multiple scopes form a union. A candidate contributes at most once per
-//! collection but may belong to several collections. Membership preserves
-//! inventory pathname spelling and identity, and does not probe files,
-//! inspect metadata, access the filesystem, or decide output suitability.
+//! An observed source file appears at most once in each collection but may
+//! belong to several collections. Membership copies its retained observed
+//! pathname unchanged and does not probe files, inspect metadata, access the
+//! filesystem, or decide output suitability.
 //!
 //! Declarations with metadata selectors remain unevaluated. They are
 //! reported separately, not as collections with empty membership.
@@ -25,8 +25,10 @@
 
 use std::path::PathBuf;
 
-use crate::candidate_inventory::{Candidate, CandidateInventory, RequiredScope};
 use crate::config::{Album, LibraryBuildSpec};
+use crate::observed_source_file_inventory::{
+    ObservedSourceFile, ObservedSourceFileInventory, RequiredScope,
+};
 use crate::source_audio::classify_source_audio;
 
 /// Directory-only membership results for one validated build specification.
@@ -36,7 +38,7 @@ pub(crate) struct CollectionMembership {
     unevaluated_album_handles: Vec<String>,
 }
 
-/// Member candidates for one evaluated collection.
+/// Established directory-only membership for one evaluated collection.
 #[derive(Debug)]
 pub(crate) struct CollectionMembers {
     album_handle: String,
@@ -64,7 +66,7 @@ impl CollectionMembers {
         &self.album_handle
     }
 
-    /// The collection's member candidates, in no specified order.
+    /// Pathnames of the collection's members, in no specified order.
     pub(crate) fn members(&self) -> &[PathBuf] {
         &self.members
     }
@@ -74,16 +76,18 @@ impl CollectionMembers {
 ///
 /// Declarations with a supplied `name` or `artist` selector are reported as
 /// unevaluated without checking their directory associations. Other declarations
-/// are evaluated even when their scopes contain no eligible candidates.
+/// are evaluated even when none of the files reported by their configured
+/// directory scopes are recognized as source audio.
 ///
-/// A candidate contributes when one of the declaration's configured
-/// directory scopes reported it and [`classify_source_audio`] recognizes its
-/// inventory pathname. Multiple matching scopes contribute it only once.
-/// Inventory pathnames are copied unchanged, and distinct candidates remain
-/// distinct.
+/// For an evaluated collection, an observed source file is a member when
+/// [`classify_source_audio`] recognizes its pathname and one of the collection's
+/// configured directory scopes reported it. The file appears only once in that
+/// collection even if multiple of its configured directory scopes reported it.
+/// Its retained observed pathname is copied unchanged into the membership result.
+/// Distinct observed source files remain distinct.
 pub(crate) fn directory_only_membership(
     spec: &LibraryBuildSpec,
-    inventory: &CandidateInventory,
+    inventory: &ObservedSourceFileInventory,
 ) -> CollectionMembership {
     let mut collections = Vec::new();
     let mut unevaluated_album_handles = Vec::new();
@@ -95,10 +99,10 @@ pub(crate) fn directory_only_membership(
         }
 
         let members: Vec<PathBuf> = inventory
-            .candidates()
-            .filter(|candidate| classify_source_audio(candidate.path()).is_some())
-            .filter(|candidate| candidate_belongs_to(candidate, album_handle))
-            .map(|candidate| candidate.path().to_path_buf())
+            .files()
+            .filter(|observed_file| classify_source_audio(observed_file.path()).is_some())
+            .filter(|observed_file| file_reported_by_configured_scope(observed_file, album_handle))
+            .map(|observed_file| observed_file.path().to_path_buf())
             .collect();
 
         collections.push(CollectionMembers {
@@ -118,12 +122,13 @@ fn directory_only_eligible(album: &Album) -> bool {
     album.name.is_none() && album.artist.is_none()
 }
 
-/// Whether a configured directory scope for `album_handle` reported `candidate`.
+/// Whether a configured directory scope for `album_handle` reported `file`.
 ///
-/// A default source-root scope may still be required to build the inventory for
-/// other declarations. It never establishes directory-only membership.
-fn candidate_belongs_to(candidate: &Candidate<'_>, album_handle: &str) -> bool {
-    candidate.scopes().any(|scope| match scope {
+/// Reporting by the default source-root scope does not satisfy this check.
+/// A matching configured scope alone does not establish membership, which also
+/// requires source-audio recognition.
+fn file_reported_by_configured_scope(file: &ObservedSourceFile<'_>, album_handle: &str) -> bool {
+    file.reporting_scopes().any(|scope| match scope {
         RequiredScope::ConfiguredDirectory {
             album_handle: scope_album_handle,
             ..
@@ -135,16 +140,17 @@ fn candidate_belongs_to(candidate: &Candidate<'_>, album_handle: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::candidate_inventory::build_candidate_inventory;
+    use crate::observed_source_file_inventory::build_observed_source_file_inventory;
     use crate::test_support::{
         SourceTreeSnapshot, TempSandbox, canonical, create_source, parse_spec,
     };
     use std::fs;
     use std::path::Path;
 
-    /// Builds a completed inventory and derives its directory-only membership.
+    /// Builds a completed observed source file inventory and derives membership.
     fn membership_for(spec: &LibraryBuildSpec, source: &Path) -> CollectionMembership {
-        let success = build_candidate_inventory(spec, source).expect("inventory must succeed");
+        let success =
+            build_observed_source_file_inventory(spec, source).expect("inventory must succeed");
         directory_only_membership(spec, success.inventory())
     }
 
@@ -163,19 +169,19 @@ mod tests {
     }
 
     #[test]
-    fn every_source_audio_candidate_contributes_without_inspecting_contents() {
+    fn directory_only_membership_does_not_inspect_source_audio_contents() {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let album = source.join("Fear of a Blank Planet");
         fs::create_dir_all(album.join("bonus")).expect("create album directories");
-        // The contents are not valid media, so contribution must not probe them.
+        // the contents are not valid media, but directory-only membership does not probe them
         fs::write(album.join("01 - Anesthetize.flac"), b"not a media file").expect("write track");
         fs::write(album.join("bonus/02 - My Ashes.FLAC"), b"").expect("write empty track");
         let spec =
             parse_spec("[albums.fear-of-a-blank-planet]\ndirectory = \"Fear of a Blank Planet\"\n");
 
         let snapshot = SourceTreeSnapshot::capture(&source);
-        let result = build_candidate_inventory(&spec, &source);
+        let result = build_observed_source_file_inventory(&spec, &source);
         snapshot.assert_unchanged();
         let success = result.expect("inventory must succeed");
 
@@ -194,7 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn unrecognized_candidates_do_not_contribute() {
+    fn files_not_recognized_as_source_audio_are_not_members() {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let album = source.join("Album");
@@ -231,7 +237,7 @@ mod tests {
         fs::write(one.join("01.flac"), b"one").expect("write first track");
         fs::write(nested.join("02.flac"), b"nested").expect("write nested track");
         fs::write(two.join("03.flac"), b"two").expect("write second track");
-        // The nested candidate is reported by both the parent and nested scopes.
+        // the nested file is reported by both the parent and nested scopes
         let spec = parse_spec(
             "[albums.collection]\ndirectories = [\"disc one\", \"disc two\", \"disc one/nested\"]\n",
         );
@@ -290,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn covered_scopes_without_eligible_candidates_establish_empty_membership() {
+    fn covered_directory_scopes_without_source_audio_yield_empty_membership() {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let empty = source.join("empty");
@@ -347,7 +353,8 @@ mod tests {
         assert_eq!(membership.collections().len(), 1);
         assert_eq!(membership.collections()[0].album_handle(), "pure");
 
-        // Candidates found only through metadata-selector scopes are excluded from this collection.
+        // these files are reported only by other declarations' configured directory
+        // scopes, so they are not members of `pure`
         let pure_members = sorted_members(&membership, "pure");
         assert_eq!(
             pure_members,
@@ -359,7 +366,7 @@ mod tests {
                 pure_members
                     .iter()
                     .all(|member| !member.starts_with(&selector_prefix)),
-                "candidate under {handle} must not join an evaluated collection"
+                "file reported only by {handle}'s configured scope must not be a member of pure"
             );
         }
     }
@@ -432,7 +439,7 @@ mod tests {
         );
 
         let snapshot = SourceTreeSnapshot::capture(&source);
-        let result = build_candidate_inventory(&spec, &source);
+        let result = build_observed_source_file_inventory(&spec, &source);
         snapshot.assert_unchanged();
         let success = result.expect("inventory must succeed");
 

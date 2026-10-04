@@ -16,38 +16,43 @@ use crate::required_discovery::{RequiredDiscovery, discover_required_files};
 mod diagnostics;
 
 pub use diagnostics::{
-    CandidateInventoryFailure, ConfiguredSelectorFailure, DefaultSourceRootFailure,
-    DefaultSourceRootFailureKind, RedundantConfiguredSelectors, RequiredScopeDiscoveryFailure,
+    ConfiguredSelectorFailure, DefaultSourceRootFailure, DefaultSourceRootFailureKind,
+    ObservedSourceFileInventoryFailure, RedundantConfiguredSelectors,
+    RequiredScopeDiscoveryFailure,
 };
 use diagnostics::{
     configured_failure_from_private, default_failure_from_private, discovery_failures_from_private,
     warnings_from_private,
 };
 
-/// Builds an inventory of ordinary files under the required scopes.
+/// Builds a complete inventory of ordinary source-side files observed under
+/// the required scopes.
 ///
 /// Preparation must succeed before discovery starts. Any scan failure returns
 /// diagnostics without a partial inventory.
 ///
-/// Equal paths under native `Path` equality share a candidate. Each retains
-/// one actually observed pathname and every distinct scope that reported it.
-/// Candidate, scope, and association iteration order is unspecified.
-/// Ordering within scope descriptions and diagnostics is preserved.
+/// Path observations equal under native `Path` equality are represented by one
+/// [`ObservedSourceFile`]. It retains one observed pathname spelling and every
+/// distinct scope that reported an equal path. Iteration order for files,
+/// scopes, and reporting associations is unspecified. Ordering within scope
+/// descriptions and diagnostics is preserved.
 ///
 /// Successful inventories include every required scope, even empty ones.
-/// Coverage records completed scans, not ongoing filesystem validity, and a
-/// scope association does not establish album membership.
+/// Coverage records completed scans, not ongoing filesystem validity.
+/// A reporting-scope association does not by itself establish collection membership.
 ///
 /// This inventory does not classify or probe files, establish media validity,
-/// interpret metadata, assign album membership or logical-track identity, or
-/// select or plan output. Other configuration does not filter candidates.
+/// interpret metadata, determine collection membership, assign logical-track
+/// identity, or select or plan output. Other configuration does not filter
+/// observed files.
+///
 /// Building the inventory does not alter file contents or directory entries.
 // Owned diagnostics make this error larger than Clippy's default threshold.
 #[allow(clippy::result_large_err)]
-pub fn build_candidate_inventory(
+pub fn build_observed_source_file_inventory(
     spec: &LibraryBuildSpec,
     source_root: &Path,
-) -> Result<CandidateInventorySuccess, CandidateInventoryFailure> {
+) -> Result<ObservedSourceFileInventorySuccess, ObservedSourceFileInventoryFailure> {
     let preparation: AlbumScopePreparation = prepare_album_scopes(spec, source_root);
     let (scopes, warnings) = match preparation {
         AlbumScopePreparation::Prepared { scopes, warnings } => (scopes, warnings),
@@ -56,7 +61,7 @@ pub fn build_candidate_inventory(
             default_source_root_failure,
             warnings,
         } => {
-            return Err(CandidateInventoryFailure::Preparation {
+            return Err(ObservedSourceFileInventoryFailure::Preparation {
                 configured_failures: configured_failures
                     .into_iter()
                     .map(configured_failure_from_private)
@@ -71,13 +76,13 @@ pub fn build_candidate_inventory(
     match discover_required_files(scopes, warnings) {
         RequiredDiscovery::Completed { coverage, warnings } => {
             let inventory = aggregate_coverage(coverage);
-            Ok(CandidateInventorySuccess {
+            Ok(ObservedSourceFileInventorySuccess {
                 inventory,
                 warnings: warnings_from_private(warnings),
             })
         }
         RequiredDiscovery::Failed { failures, warnings } => {
-            Err(CandidateInventoryFailure::Discovery {
+            Err(ObservedSourceFileInventoryFailure::Discovery {
                 failures: discovery_failures_from_private(failures),
                 warnings: warnings_from_private(warnings),
             })
@@ -87,14 +92,14 @@ pub fn build_candidate_inventory(
 
 /// Inventory with warnings from preparation.
 #[derive(Debug)]
-pub struct CandidateInventorySuccess {
-    inventory: CandidateInventory,
+pub struct ObservedSourceFileInventorySuccess {
+    inventory: ObservedSourceFileInventory,
     warnings: Vec<RedundantConfiguredSelectors>,
 }
 
-impl CandidateInventorySuccess {
+impl ObservedSourceFileInventorySuccess {
     /// The inventory.
-    pub fn inventory(&self) -> &CandidateInventory {
+    pub fn inventory(&self) -> &ObservedSourceFileInventory {
         &self.inventory
     }
 
@@ -104,14 +109,15 @@ impl CandidateInventorySuccess {
     }
 }
 
-/// Distinct paths and the required scopes that reported them.
+/// Complete required-scope coverage, with distinct observed source files and
+/// their reporting-scope associations.
 #[derive(Debug)]
-pub struct CandidateInventory {
+pub struct ObservedSourceFileInventory {
     scopes: Vec<RequiredScope>,
     entries: HashMap<PathBuf, Vec<usize>>,
 }
 
-impl CandidateInventory {
+impl ObservedSourceFileInventory {
     /// Every required scope in this completed inventory, including empty ones.
     ///
     /// Order is unspecified.
@@ -119,27 +125,29 @@ impl CandidateInventory {
         &self.scopes
     }
 
-    /// Iterates over distinct paths. Order is unspecified.
-    pub fn candidates(&self) -> impl Iterator<Item = Candidate<'_>> + '_ {
-        self.entries.iter().map(|(path, scope_indices)| Candidate {
-            path: path.as_path(),
-            scope_indices: scope_indices.as_slice(),
-            scopes: self.scopes.as_slice(),
-        })
+    /// Iterates over the observed source files. Order is unspecified.
+    pub fn files(&self) -> impl Iterator<Item = ObservedSourceFile<'_>> + '_ {
+        self.entries
+            .iter()
+            .map(|(path, scope_indices)| ObservedSourceFile {
+                path: path.as_path(),
+                scope_indices: scope_indices.as_slice(),
+                scopes: self.scopes.as_slice(),
+            })
     }
 }
 
-/// One distinct ordinary pathname observed by required-scope discovery and
-/// its reporting scopes.
+/// An ordinary source-side file observed by required-scope discovery,
+/// represented by one pathname and its reporting scopes.
 #[derive(Debug)]
-pub struct Candidate<'inventory> {
+pub struct ObservedSourceFile<'inventory> {
     path: &'inventory Path,
     scope_indices: &'inventory [usize],
     scopes: &'inventory [RequiredScope],
 }
 
-impl<'inventory> Candidate<'inventory> {
-    /// An observed spelling for this candidate.
+impl<'inventory> ObservedSourceFile<'inventory> {
+    /// The retained observed pathname spelling for this file.
     ///
     /// Selection among equal observations is unspecified.
     pub fn path(&self) -> &'inventory Path {
@@ -148,8 +156,9 @@ impl<'inventory> Candidate<'inventory> {
 
     /// Scopes that reported an equal path under native `Path` equality.
     ///
-    /// This does not establish album membership. Order is unspecified.
-    pub fn scopes(&self) -> impl Iterator<Item = &'inventory RequiredScope> + '_ {
+    /// These associations do not by themselves establish collection membership.
+    /// Order is unspecified.
+    pub fn reporting_scopes(&self) -> impl Iterator<Item = &'inventory RequiredScope> + '_ {
         self.scope_indices.iter().map(|&index| &self.scopes[index])
     }
 }
@@ -200,7 +209,9 @@ fn required_scope_from_default_source_root(
     }
 }
 
-fn aggregate_coverage(coverage: crate::required_discovery::RequiredCoverage) -> CandidateInventory {
+fn aggregate_coverage(
+    coverage: crate::required_discovery::RequiredCoverage,
+) -> ObservedSourceFileInventory {
     let mut scopes: Vec<RequiredScope> =
         Vec::with_capacity(coverage.configured.len() + coverage.default.iter().len());
     let mut files_per_scope: Vec<Vec<PathBuf>> =
@@ -219,7 +230,7 @@ fn aggregate_coverage(coverage: crate::required_discovery::RequiredCoverage) -> 
 fn aggregate_observations(
     scopes: Vec<RequiredScope>,
     files_per_scope: Vec<Vec<PathBuf>>,
-) -> CandidateInventory {
+) -> ObservedSourceFileInventory {
     let total: usize = files_per_scope.iter().map(Vec::len).sum();
     let mut entries: HashMap<PathBuf, Vec<usize>> = HashMap::with_capacity(total);
     for (scope_index, files) in files_per_scope.iter().enumerate() {
@@ -236,7 +247,7 @@ fn aggregate_observations(
             }
         }
     }
-    CandidateInventory { scopes, entries }
+    ObservedSourceFileInventory { scopes, entries }
 }
 
 #[cfg(test)]
@@ -257,16 +268,16 @@ mod tests {
     }
 
     fn find_entry<'inventory>(
-        inventory: &'inventory CandidateInventory,
+        inventory: &'inventory ObservedSourceFileInventory,
         path: &Path,
-    ) -> Option<Candidate<'inventory>> {
+    ) -> Option<ObservedSourceFile<'inventory>> {
         inventory
-            .candidates()
-            .find(|candidate| candidate.path() == path)
+            .files()
+            .find(|observed_file| observed_file.path() == path)
     }
 
     #[test]
-    fn equal_path_observations_with_different_spellings_share_one_candidate() {
+    fn equal_path_observations_with_different_spellings_share_one_observed_source_file() {
         let scopes = vec![
             configured_scope("one", "/music/album", &["Album"]),
             configured_scope("two", "/music/album", &["Album"]),
@@ -284,10 +295,14 @@ mod tests {
             aggregate_observations(scopes, vec![vec![first.clone()], vec![second.clone()]]);
 
         assert_eq!(inventory.covered_scopes().len(), 2);
-        let mut candidates: Vec<Candidate<'_>> = inventory.candidates().collect();
-        assert_eq!(candidates.len(), 1, "equal observations must deduplicate");
-        let candidate = candidates.pop().expect("one candidate");
-        let representative = candidate.path();
+        let mut observed_files: Vec<ObservedSourceFile<'_>> = inventory.files().collect();
+        assert_eq!(
+            observed_files.len(),
+            1,
+            "equal observations must deduplicate"
+        );
+        let observed_file = observed_files.pop().expect("one observed source file");
+        let representative = observed_file.path();
         assert!(
             representative == first.as_path() || representative == second.as_path(),
             "representative must be one reported pathname"
@@ -297,8 +312,8 @@ mod tests {
                 || representative.as_os_str() == second.as_os_str(),
             "representative spelling must match one observation"
         );
-        let mut handles: Vec<&str> = candidate
-            .scopes()
+        let mut handles: Vec<&str> = observed_file
+            .reporting_scopes()
             .map(|scope| match scope {
                 RequiredScope::ConfiguredDirectory { album_handle, .. } => album_handle.as_str(),
                 RequiredScope::DefaultSourceRoot { .. } => {
@@ -308,7 +323,7 @@ mod tests {
             .collect();
         handles.sort();
         assert_eq!(handles, ["one", "two"]);
-        assert_eq!(candidate.scopes().count(), 2);
+        assert_eq!(observed_file.reporting_scopes().count(), 2);
     }
 
     #[test]
@@ -322,13 +337,13 @@ mod tests {
             ]],
         );
 
-        assert_eq!(inventory.candidates().count(), 2);
+        assert_eq!(inventory.files().count(), 2);
         assert!(find_entry(&inventory, Path::new("/music/album/a.dat")).is_some());
         assert!(find_entry(&inventory, Path::new("/music/album/b.dat")).is_some());
     }
 
     #[test]
-    fn empty_scopes_stay_covered_without_candidates() {
+    fn empty_scopes_stay_covered_without_observed_files() {
         let scopes = vec![
             configured_scope("one", "/music/one", &["one"]),
             configured_scope("two", "/music/two", &["two"]),
@@ -339,10 +354,10 @@ mod tests {
         );
 
         assert_eq!(inventory.covered_scopes().len(), 2);
-        assert_eq!(inventory.candidates().count(), 1);
-        let candidate = find_entry(&inventory, Path::new("/music/one/track.dat"))
-            .expect("populated scope candidate must exist");
-        assert_eq!(candidate.scopes().count(), 1);
+        assert_eq!(inventory.files().count(), 1);
+        let observed_file = find_entry(&inventory, Path::new("/music/one/track.dat"))
+            .expect("populated scope file must exist");
+        assert_eq!(observed_file.reporting_scopes().count(), 1);
     }
 
     #[test]
@@ -356,11 +371,11 @@ mod tests {
             ]],
         );
 
-        assert_eq!(inventory.candidates().count(), 1);
-        let candidate = find_entry(&inventory, Path::new("/music/album/track.dat"))
-            .expect("candidate must exist");
+        assert_eq!(inventory.files().count(), 1);
+        let observed_file = find_entry(&inventory, Path::new("/music/album/track.dat"))
+            .expect("observed source file must exist");
         assert_eq!(
-            candidate.scopes().count(),
+            observed_file.reporting_scopes().count(),
             1,
             "one scope yields one association even with duplicate equal observations"
         );

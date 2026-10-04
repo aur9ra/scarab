@@ -4,7 +4,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! Integration tests for filesystem candidate inventory.
+//! Integration tests for observed source file inventory.
 
 use std::ffi::OsStr;
 use std::fs;
@@ -12,9 +12,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use scarab::{
-    CandidateInventoryFailure, ConfiguredSelectorFailure, DefaultSourceRootFailure,
-    DefaultSourceRootFailureKind, DiscoveryError, LibraryBuildSpec, RedundantConfiguredSelectors,
-    RequiredScope, RequiredScopeDiscoveryFailure, build_candidate_inventory,
+    ConfiguredSelectorFailure, DefaultSourceRootFailure, DefaultSourceRootFailureKind,
+    DiscoveryError, LibraryBuildSpec, ObservedSourceFileInventoryFailure,
+    RedundantConfiguredSelectors, RequiredScope, RequiredScopeDiscoveryFailure,
+    build_observed_source_file_inventory,
 };
 
 mod common;
@@ -72,11 +73,12 @@ fn zero_albums_missing_unrelated_root_succeeds_empty() {
     let missing_root = sandbox.path().join("missing-root");
     let spec = parse_spec("");
 
-    let result = build_candidate_inventory(&spec, &missing_root).expect("zero albums must succeed");
+    let result = build_observed_source_file_inventory(&spec, &missing_root)
+        .expect("zero albums must succeed");
 
     assert!(result.warnings().is_empty());
     assert!(result.inventory().covered_scopes().is_empty());
-    assert_eq!(result.inventory().candidates().count(), 0);
+    assert_eq!(result.inventory().files().count(), 0);
 }
 
 #[test]
@@ -92,7 +94,7 @@ fn absolute_configured_only_scope_ignores_unusable_source_root() {
     ));
 
     let snapshot = SourceTreeSnapshot::capture(sandbox.path());
-    let result = build_candidate_inventory(&spec, &missing_root);
+    let result = build_observed_source_file_inventory(&spec, &missing_root);
     snapshot.assert_unchanged();
     let success = result.expect("absolute selector must ignore the missing root");
 
@@ -116,13 +118,13 @@ fn absolute_configured_only_scope_ignores_unusable_source_root() {
         }
         other => panic!("expected configured scope, got {other:?}"),
     }
-    let candidates: Vec<_> = success.inventory().candidates().collect();
-    assert_eq!(candidates.len(), 1);
+    let observed_files: Vec<_> = success.inventory().files().collect();
+    assert_eq!(observed_files.len(), 1);
     assert_eq!(
-        candidates[0].path(),
+        observed_files[0].path(),
         canonical(&target).join("track.dat").as_path()
     );
-    assert_eq!(candidates[0].scopes().count(), 1);
+    assert_eq!(observed_files[0].reporting_scopes().count(), 1);
 }
 
 #[test]
@@ -137,7 +139,7 @@ fn shared_default_single_scope_with_declaration_ordered_dependents() {
     );
 
     let snapshot = SourceTreeSnapshot::capture(&source);
-    let result = build_candidate_inventory(&spec, &source);
+    let result = build_observed_source_file_inventory(&spec, &source);
     snapshot.assert_unchanged();
     let success = result.expect("shared default must succeed");
 
@@ -156,13 +158,13 @@ fn shared_default_single_scope_with_declaration_ordered_dependents() {
         }
         other => panic!("expected default scope, got {other:?}"),
     }
-    let candidates: Vec<_> = success.inventory().candidates().collect();
-    assert_eq!(candidates.len(), 1);
+    let observed_files: Vec<_> = success.inventory().files().collect();
+    assert_eq!(observed_files.len(), 1);
     assert_eq!(
-        candidates[0].path(),
+        observed_files[0].path(),
         canonical(&source).join("sentinel.txt").as_path()
     );
-    assert_eq!(candidates[0].scopes().count(), 1);
+    assert_eq!(observed_files[0].reporting_scopes().count(), 1);
 }
 
 #[test]
@@ -179,7 +181,7 @@ fn mixed_empty_and_populated_scopes_both_stay_visible() {
     );
 
     let snapshot = SourceTreeSnapshot::capture(&source);
-    let result = build_candidate_inventory(&spec, &source);
+    let result = build_observed_source_file_inventory(&spec, &source);
     snapshot.assert_unchanged();
     let success = result.expect("mixed scopes must succeed");
 
@@ -204,14 +206,16 @@ fn mixed_empty_and_populated_scopes_both_stay_visible() {
         }
         _ => unreachable!(),
     }
-    let candidates: Vec<_> = success.inventory().candidates().collect();
-    assert_eq!(candidates.len(), 1);
-    let candidate = success
+    let observed_files: Vec<_> = success.inventory().files().collect();
+    assert_eq!(observed_files.len(), 1);
+    let observed_file = success
         .inventory()
-        .candidates()
-        .find(|candidate| candidate.path() == canonical(&populated).join("track.dat").as_path())
-        .expect("populated file must be a candidate");
-    assert_eq!(candidate.scopes().count(), 1);
+        .files()
+        .find(|observed_file| {
+            observed_file.path() == canonical(&populated).join("track.dat").as_path()
+        })
+        .expect("populated file must be observed");
+    assert_eq!(observed_file.reporting_scopes().count(), 1);
     let _ = two;
 }
 
@@ -227,29 +231,33 @@ fn within_album_overlap_parent_and_nested_scopes() {
     let spec = parse_spec("[albums.tool]\ndirectories = [\"parent\", \"parent/child\"]\n");
 
     let snapshot = SourceTreeSnapshot::capture(&source);
-    let result = build_candidate_inventory(&spec, &source);
+    let result = build_observed_source_file_inventory(&spec, &source);
     snapshot.assert_unchanged();
     let success = result.expect("overlapping scopes must succeed");
 
     assert!(success.warnings().is_empty());
     assert_eq!(success.inventory().covered_scopes().len(), 2);
-    let candidates: Vec<_> = success.inventory().candidates().collect();
-    assert_eq!(candidates.len(), 2, "two distinct pathnames total");
+    let observed_files: Vec<_> = success.inventory().files().collect();
+    assert_eq!(observed_files.len(), 2, "two distinct pathnames total");
     let root = success
         .inventory()
-        .candidates()
-        .find(|candidate| candidate.path() == canonical(&parent).join("root.txt").as_path())
-        .expect("root file must be a candidate");
-    assert_eq!(root.scopes().count(), 1, "root file belongs to one scope");
+        .files()
+        .find(|observed_file| observed_file.path() == canonical(&parent).join("root.txt").as_path())
+        .expect("root file must be observed");
+    assert_eq!(
+        root.reporting_scopes().count(),
+        1,
+        "root file has one reporting scope"
+    );
     let nested = success
         .inventory()
-        .candidates()
-        .find(|candidate| candidate.path() == canonical(&child).join("track.dat").as_path())
-        .expect("nested file must be a candidate");
+        .files()
+        .find(|observed_file| observed_file.path() == canonical(&child).join("track.dat").as_path())
+        .expect("nested file must be observed");
     assert_eq!(
-        nested.scopes().count(),
+        nested.reporting_scopes().count(),
         2,
-        "nested file belongs to both scopes"
+        "nested file has both reporting scopes"
     );
 }
 
@@ -266,7 +274,7 @@ fn across_album_overlap_equal_path_retains_both_scopes() {
     );
 
     let snapshot = SourceTreeSnapshot::capture(&source);
-    let result = build_candidate_inventory(&spec, &source);
+    let result = build_observed_source_file_inventory(&spec, &source);
     snapshot.assert_unchanged();
     let success = result.expect("shared roots must succeed");
 
@@ -274,13 +282,21 @@ fn across_album_overlap_equal_path_retains_both_scopes() {
     let scopes = success.inventory().covered_scopes();
     assert_eq!(scopes.len(), 2);
     let expected = canonical(&shared).join("track.dat");
-    let candidates: Vec<_> = success.inventory().candidates().collect();
-    assert_eq!(candidates.len(), 1, "one equal-path candidate");
-    let candidate = &candidates[0];
-    assert_eq!(candidate.path(), expected.as_path());
-    assert_eq!(candidate.scopes().count(), 2, "both scopes stay associated");
-    let mut handles: Vec<&str> = candidate
-        .scopes()
+    let observed_files: Vec<_> = success.inventory().files().collect();
+    assert_eq!(
+        observed_files.len(),
+        1,
+        "equal-path observations must produce one observed source file"
+    );
+    let observed_file = &observed_files[0];
+    assert_eq!(observed_file.path(), expected.as_path());
+    assert_eq!(
+        observed_file.reporting_scopes().count(),
+        2,
+        "both reporting scopes stay associated"
+    );
+    let mut handles: Vec<&str> = observed_file
+        .reporting_scopes()
         .map(|scope| match scope {
             RequiredScope::ConfiguredDirectory { album_handle, .. } => album_handle.as_str(),
             RequiredScope::DefaultSourceRoot { .. } => panic!("expected configured scope"),
@@ -300,7 +316,7 @@ fn duplicate_selectors_with_dot_spelling_keep_one_association() {
     let spec = parse_spec("[albums.tool]\ndirectories = [\"Album\", \"Album/.\", \"Album\"]\n");
 
     let snapshot = SourceTreeSnapshot::capture(&source);
-    let result = build_candidate_inventory(&spec, &source);
+    let result = build_observed_source_file_inventory(&spec, &source);
     snapshot.assert_unchanged();
     let success = result.expect("duplicate selectors must succeed");
 
@@ -337,17 +353,17 @@ fn duplicate_selectors_with_dot_spelling_keep_one_association() {
             _ => unreachable!(),
         }
     );
-    let candidates: Vec<_> = success.inventory().candidates().collect();
-    assert_eq!(candidates.len(), 1);
+    let observed_files: Vec<_> = success.inventory().files().collect();
+    assert_eq!(observed_files.len(), 1);
     assert_eq!(
-        candidates[0].scopes().count(),
+        observed_files[0].reporting_scopes().count(),
         1,
         "grouped occurrences yield one association"
     );
 }
 
 #[test]
-fn configured_and_default_equal_roots_share_candidate_with_two_scopes() {
+fn configured_and_default_equal_roots_share_observed_file_with_two_scopes() {
     let sandbox = TempSandbox::new();
     let source = create_source(&sandbox);
     fs::write(source.join("track.dat"), b"track").expect("write track");
@@ -357,7 +373,7 @@ fn configured_and_default_equal_roots_share_candidate_with_two_scopes() {
     );
 
     let snapshot = SourceTreeSnapshot::capture(&source);
-    let result = build_candidate_inventory(&spec, &source);
+    let result = build_observed_source_file_inventory(&spec, &source);
     snapshot.assert_unchanged();
     let success = result.expect("equal configured and default roots must succeed");
 
@@ -365,11 +381,11 @@ fn configured_and_default_equal_roots_share_candidate_with_two_scopes() {
     let scopes = success.inventory().covered_scopes();
     assert_eq!(scopes.len(), 2);
     let expected = canonical(&source).join("track.dat");
-    let candidates: Vec<_> = success.inventory().candidates().collect();
-    assert_eq!(candidates.len(), 1, "one shared candidate");
-    assert_eq!(candidates[0].path(), expected.as_path());
+    let observed_files: Vec<_> = success.inventory().files().collect();
+    assert_eq!(observed_files.len(), 1, "one shared observed file");
+    assert_eq!(observed_files[0].path(), expected.as_path());
     assert_eq!(
-        candidates[0].scopes().count(),
+        observed_files[0].reporting_scopes().count(),
         2,
         "configured and default scopes stay distinct"
     );
@@ -405,18 +421,18 @@ fn file_content_and_configuration_blindness() {
     );
 
     let snapshot = SourceTreeSnapshot::capture(&source);
-    let result = build_candidate_inventory(&spec, &source);
+    let result = build_observed_source_file_inventory(&spec, &source);
     snapshot.assert_unchanged();
     let success = result.expect("blind discovery must succeed");
 
     let mut names: Vec<String> = success
         .inventory()
-        .candidates()
-        .map(|candidate| {
-            candidate
+        .files()
+        .map(|observed_file| {
+            observed_file
                 .path()
                 .file_name()
-                .expect("candidate must have a file name")
+                .expect("observed file must have a file name")
                 .to_string_lossy()
                 .into_owned()
         })
@@ -435,7 +451,7 @@ fn file_content_and_configuration_blindness() {
 }
 
 #[test]
-fn hard_link_pathnames_stay_separate_candidates() {
+fn hard_link_pathnames_stay_separate_observed_files() {
     let sandbox = TempSandbox::new();
     let source = create_source(&sandbox);
     let album = source.join("Album");
@@ -449,7 +465,7 @@ fn hard_link_pathnames_stay_separate_candidates() {
     let spec = parse_spec("[albums.tool]\ndirectory = \"Album\"\n");
 
     let snapshot = SourceTreeSnapshot::capture(&source);
-    let result = build_candidate_inventory(&spec, &source);
+    let result = build_observed_source_file_inventory(&spec, &source);
     snapshot.assert_unchanged();
     let success = result.expect("hard link tree must succeed");
 
@@ -462,17 +478,23 @@ fn hard_link_pathnames_stay_separate_candidates() {
     );
     let mut found_original = false;
     let mut found_link = false;
-    for candidate in success.inventory().candidates() {
-        if candidate.path() == expected_original.as_path() {
+    for observed_file in success.inventory().files() {
+        if observed_file.path() == expected_original.as_path() {
             found_original = true;
-        } else if candidate.path() == expected_link.as_path() {
+        } else if observed_file.path() == expected_link.as_path() {
             found_link = true;
         }
     }
-    assert!(found_original, "original pathname must stay a candidate");
-    assert!(found_link, "linked pathname must stay a separate candidate");
+    assert!(
+        found_original,
+        "inventory must retain the original hard-link pathname"
+    );
+    assert!(
+        found_link,
+        "inventory must also retain the distinct linked pathname"
+    );
     assert_eq!(
-        success.inventory().candidates().count(),
+        success.inventory().files().count(),
         2,
         "hard links are distinct pathnames"
     );
@@ -489,7 +511,7 @@ fn warning_on_success_retains_full_redundancy() {
         parse_spec("[albums.stupid-dream]\ndirectories = [\"Stupid Dream\", \"Stupid Dream\"]\n");
 
     let snapshot = SourceTreeSnapshot::capture(&source);
-    let result = build_candidate_inventory(&spec, &source);
+    let result = build_observed_source_file_inventory(&spec, &source);
     snapshot.assert_unchanged();
     let success = result.expect("redundant selectors must succeed");
 
@@ -540,12 +562,12 @@ fn preparation_failure_retains_configured_default_and_warning_without_inventory(
     ));
 
     let snapshot = SourceTreeSnapshot::capture(sandbox.path());
-    let result = build_candidate_inventory(&spec, &missing_root);
+    let result = build_observed_source_file_inventory(&spec, &missing_root);
     snapshot.assert_unchanged();
     let failure = result.expect_err("preparation must fail");
 
     match &failure {
-        CandidateInventoryFailure::Preparation {
+        ObservedSourceFileInventoryFailure::Preparation {
             configured_failures,
             default_source_root_failure,
             warnings,
@@ -642,22 +664,24 @@ fn public_diagnostic_vocabulary_constructs_and_matches_externally() {
     };
     assert_eq!(scope_variant, "default");
 
-    let preparation = CandidateInventoryFailure::Preparation {
+    let preparation = ObservedSourceFileInventoryFailure::Preparation {
         configured_failures: vec![configured],
         default_source_root_failure: Some(default),
         warnings: vec![warning],
     };
-    let discovery = CandidateInventoryFailure::Discovery {
+    let discovery = ObservedSourceFileInventoryFailure::Discovery {
         failures: vec![scope_failure],
         warnings: Vec::new(),
     };
-    // Wildcard-free matches prove `CandidateInventoryFailure` stays exhaustive.
+    // Wildcard-free matches prove the inventory failure remains exhaustive.
     for failure in [&preparation, &discovery] {
         match failure {
-            CandidateInventoryFailure::Preparation { .. } => {
+            ObservedSourceFileInventoryFailure::Preparation { .. } => {
                 assert_eq!(failure.warnings().len(), 1)
             }
-            CandidateInventoryFailure::Discovery { .. } => assert!(failure.warnings().is_empty()),
+            ObservedSourceFileInventoryFailure::Discovery { .. } => {
+                assert!(failure.warnings().is_empty())
+            }
         }
     }
 }
@@ -670,7 +694,7 @@ mod unix {
     use std::os::unix::fs::symlink;
 
     #[test]
-    fn non_utf8_file_name_stays_native_candidate() {
+    fn non_utf8_file_name_is_preserved_in_observed_pathname() {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let album = source.join("Album");
@@ -683,23 +707,23 @@ mod unix {
         let spec = parse_spec("[albums.tool]\ndirectory = \"Album\"\n");
 
         let snapshot = SourceTreeSnapshot::capture(&source);
-        let result = build_candidate_inventory(&spec, &source);
+        let result = build_observed_source_file_inventory(&spec, &source);
         snapshot.assert_unchanged();
         let success = result.expect("non-utf8 tree must succeed");
 
         let expected = canonical(&album).join(&name);
-        let candidate = success
+        let observed_file = success
             .inventory()
-            .candidates()
-            .find(|candidate| candidate.path() == expected.as_path())
-            .expect("native non-utf8 pathname must stay a candidate");
+            .files()
+            .find(|observed_file| observed_file.path() == expected.as_path())
+            .expect("inventory must retain the native non-utf8 pathname");
         assert_eq!(
-            candidate.path().as_os_str(),
+            observed_file.path().as_os_str(),
             expected.as_os_str(),
             "native spelling must be retained without String conversion"
         );
         assert!(
-            candidate.path().to_str().is_none(),
+            observed_file.path().to_str().is_none(),
             "test precondition needs a non-utf8 name"
         );
     }
@@ -721,7 +745,7 @@ mod unix {
         let spec = parse_spec("[albums.tool]\ndirectory = \"link\"\n");
 
         let snapshot = SourceTreeSnapshot::capture(&source);
-        let result = build_candidate_inventory(&spec, &source);
+        let result = build_observed_source_file_inventory(&spec, &source);
         snapshot.assert_unchanged();
         let success = result.expect("resolved symlink root must succeed");
 
@@ -740,10 +764,10 @@ mod unix {
             }
             other => panic!("expected configured scope, got {other:?}"),
         }
-        let candidates: Vec<_> = success.inventory().candidates().collect();
-        assert_eq!(candidates.len(), 1, "descendant symlinks stay skipped");
+        let observed_files: Vec<_> = success.inventory().files().collect();
+        assert_eq!(observed_files.len(), 1, "descendant symlinks stay skipped");
         assert_eq!(
-            candidates[0].path(),
+            observed_files[0].path(),
             canonical(&real).join("track.dat").as_path()
         );
     }

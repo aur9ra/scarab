@@ -25,10 +25,10 @@ jobs:
         run: cargo test --lib source_audio
       - name: Run required-discovery unit tests
         run: cargo test --lib required_discovery
-      - name: Run candidate-inventory unit tests
-        run: cargo test --lib candidate_inventory
-      - name: Run candidate-inventory integration tests
-        run: cargo test --test candidate_inventory
+      - name: Run observed-source-file-inventory unit tests
+        run: cargo test --lib observed_source_file_inventory
+      - name: Run observed-source-file-inventory integration tests
+        run: cargo test --test observed_source_file_inventory
       - name: Run test-support unit tests
         run: cargo test --lib test_support
       - name: Run sandbox lifecycle integration tests

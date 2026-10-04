@@ -12,7 +12,7 @@
 //!
 //! The primitive is deliberately narrow. It does not iterate album
 //! declarations, accumulate failures across declarations, default a scope for
-//! an undeclared selector, associate candidate files, interpret metadata, or
+//! an undeclared selector, associate files with scopes, interpret metadata, or
 //! decide album membership. It reports only that canonicalization produced a
 //! pathname and that a subsequent metadata lookup through that pathname
 //! reported a directory. Continuing object identity, readability, containment

@@ -4,7 +4,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! Warnings and failures for candidate-inventory construction.
+//! Warnings and failures for observed source file inventory construction.
 
 use std::fmt;
 use std::io;
@@ -29,9 +29,9 @@ pub struct RedundantConfiguredSelectors {
     pub contributing_selectors: Vec<PathBuf>,
 }
 
-/// Candidate-inventory failure.
+/// Observed source file inventory failure.
 #[derive(Debug)]
-pub enum CandidateInventoryFailure {
+pub enum ObservedSourceFileInventoryFailure {
     /// Preparation failed; discovery did not run.
     Preparation {
         /// Directory-selector failures in declaration and selector order.
@@ -50,27 +50,27 @@ pub enum CandidateInventoryFailure {
     },
 }
 
-impl CandidateInventoryFailure {
+impl ObservedSourceFileInventoryFailure {
     /// Preparation warnings retained by the failure.
     pub fn warnings(&self) -> &[RedundantConfiguredSelectors] {
         match self {
-            CandidateInventoryFailure::Preparation { warnings, .. }
-            | CandidateInventoryFailure::Discovery { warnings, .. } => warnings,
+            ObservedSourceFileInventoryFailure::Preparation { warnings, .. }
+            | ObservedSourceFileInventoryFailure::Discovery { warnings, .. } => warnings,
         }
     }
 }
 
-impl fmt::Display for CandidateInventoryFailure {
+impl fmt::Display for ObservedSourceFileInventoryFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CandidateInventoryFailure::Preparation {
+            ObservedSourceFileInventoryFailure::Preparation {
                 configured_failures,
                 default_source_root_failure,
                 ..
             } => {
                 write!(
                     f,
-                    "candidate inventory preparation failed with {} configured failure(s)",
+                    "observed source file inventory preparation failed with {} configured failure(s)",
                     configured_failures.len()
                 )?;
                 if default_source_root_failure.is_some() {
@@ -78,10 +78,10 @@ impl fmt::Display for CandidateInventoryFailure {
                 }
                 Ok(())
             }
-            CandidateInventoryFailure::Discovery { failures, .. } => {
+            ObservedSourceFileInventoryFailure::Discovery { failures, .. } => {
                 write!(
                     f,
-                    "candidate inventory discovery failed with {} scope failure(s)",
+                    "observed source file inventory discovery failed with {} scope failure(s)",
                     failures.len()
                 )
             }
@@ -89,7 +89,7 @@ impl fmt::Display for CandidateInventoryFailure {
     }
 }
 
-impl std::error::Error for CandidateInventoryFailure {
+impl std::error::Error for ObservedSourceFileInventoryFailure {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         None
     }
@@ -445,7 +445,7 @@ mod tests {
 
     #[test]
     fn failure_display_and_error_source_are_stable() {
-        let preparation = CandidateInventoryFailure::Preparation {
+        let preparation = ObservedSourceFileInventoryFailure::Preparation {
             configured_failures: vec![ConfiguredSelectorFailure {
                 album_handle: "tool".to_owned(),
                 configured_selector: PathBuf::from("missing"),
@@ -460,23 +460,23 @@ mod tests {
         };
         assert_eq!(
             preparation.to_string(),
-            "candidate inventory preparation failed with 1 configured failure(s) \
+            "observed source file inventory preparation failed with 1 configured failure(s) \
              and a default source root failure"
         );
         assert!(std::error::Error::source(&preparation).is_none());
 
-        let configured_only = CandidateInventoryFailure::Preparation {
+        let configured_only = ObservedSourceFileInventoryFailure::Preparation {
             configured_failures: Vec::new(),
             default_source_root_failure: None,
             warnings: Vec::new(),
         };
         assert_eq!(
             configured_only.to_string(),
-            "candidate inventory preparation failed with 0 configured failure(s)"
+            "observed source file inventory preparation failed with 0 configured failure(s)"
         );
         assert!(std::error::Error::source(&configured_only).is_none());
 
-        let discovery = CandidateInventoryFailure::Discovery {
+        let discovery = ObservedSourceFileInventoryFailure::Discovery {
             failures: vec![RequiredScopeDiscoveryFailure {
                 scope: RequiredScope::DefaultSourceRoot {
                     original_source_root: PathBuf::from("source"),
@@ -491,7 +491,7 @@ mod tests {
         };
         assert_eq!(
             discovery.to_string(),
-            "candidate inventory discovery failed with 1 scope failure(s)"
+            "observed source file inventory discovery failed with 1 scope failure(s)"
         );
         assert!(std::error::Error::source(&discovery).is_none());
     }
