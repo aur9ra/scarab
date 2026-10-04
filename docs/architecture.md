@@ -12,7 +12,7 @@ Configuration validation is limited to validating the internal consistency of a 
 
 Directory resolution and filesystem discovery are observations, not lasting validity guarantees. Resolving a path does not establish containment within `source_root`, and discovery does not establish a stable filesystem snapshot.
 
-Source-audio classification is purely lexical: it classifies a pathname, not the existence, readability, or media contents of a file. Probing observes media information for one supplied pathname. It does not determine album membership or whether/how the file will be included in the built library.
+Source-audio classification is purely lexical: it classifies a pathname, not the existence, readability, or media contents of a file. Probing observes media information for one supplied pathname. It does not determine collection membership or whether/how the file will be included in the built library.
 
 An observed source file’s reporting-scope association does not by itself establish collection membership. Membership interprets reporting-scope associations together with supplied metadata predicates. Output policy separately determines what to emit and how that output is produced.
 
@@ -22,13 +22,15 @@ A failed or incomplete observation does not by itself establish a negative resul
 
 `LibraryBuildSpec` is a validated declarative specification, not mutable execution state. Nested values detached from a validated `LibraryBuildSpec` do not carry its aggregate validation guarantees independently.
 
-Album handles are configuration identities and rule targets, not album metadata identities such as name or artist. Each supplied exact metadata value is distinct from an omitted metadata predicate, including an explicitly supplied empty or whitespace-only value.
+Collection handles are exact configuration identities and rule targets, not album metadata identities such as name or artist. Each supplied exact metadata value is distinct from an omitted metadata predicate, including an explicitly supplied empty or whitespace-only value.
 
 Configuration ordering does not establish policy precedence.
 
 ## Paths, scopes, and coverage
 
-`source_root` is an anchor for relative explicit selectors and supplies the default scope for albums that omit explicit selectors. It is not a containment boundary or a security boundary. Explicit selectors and the implicit default scope have distinct meanings, and failure to resolve an explicit selector does not make that selector equivalent to omission or activate default-scope fallback.
+Directory-selector resolution interprets one configured selector independently of collection identity. Scope preparation produces filesystem scopes on behalf of collection declarations. Scope coverage, membership evaluation, and output policy are distinct concerns. A collection declaration supplies membership criteria, while collection rules target handles to override output policy.
+
+`source_root` is an anchor for relative explicit selectors and supplies the default scope for collection declarations that omit explicit selectors. It is not a containment boundary or a security boundary. Explicit selectors and the implicit default scope have distinct meanings, and failure to resolve an explicit selector does not make that selector equivalent to omission or activate default-scope fallback.
 
 Logical scopes remain distinct even when their `PathBuf` roots compare equal. Observed source file pathnames are compared using native `Path` equality. This is pathname identity, not physical-file identity. A complete observed source file inventory requires complete coverage of every required scope, including scopes that report no files.
 
@@ -38,6 +40,6 @@ Work sharing during coverage cannot hide a failure in required coverage or erase
 
 Membership interprets an observed source file’s reporting-scope associations together with every exact metadata predicate when supplied. A collection’s configured directory scopes contribute a union of observed source files. Directory-only membership includes the files in that union recognized as source audio. An observed source file may belong to several configured collections. This is valid and does not itself create ambiguity or an ownership conflict. No first-wins or declaration-order rule assigns a file to a collection.
 
-Global -> album -> track overrides are explicit policy. Conflicting rules at the same precedence level block rather than being resolved by declaration order. Missing or ambiguous encoding requirements block encoding. Core logic does not prompt on stdin to resolve such requirements.
+Global -> collection -> track overrides are explicit policy. Conflicting rules at the same precedence level block rather than being resolved by declaration order. Missing or ambiguous encoding requirements block encoding. Core logic does not prompt on stdin to resolve such requirements.
 
-Positive source-audio classification reserves the source-audio role for that pathname. Probe failure, membership non-match, or output exclusion does not reopen auxiliary-file handling. Auxiliary-file selection does not establish album membership or expand album scopes.
+Positive source-audio classification reserves the source-audio role for that pathname. Probe failure, membership non-match, or output exclusion does not reopen auxiliary-file handling. Auxiliary-file selection does not establish collection membership or expand collection scopes.

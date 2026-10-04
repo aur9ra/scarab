@@ -22,8 +22,8 @@ mod common;
 
 use common::{SourceTreeSnapshot, TempSandbox};
 
-fn parse_spec(album_declarations: &str) -> LibraryBuildSpec {
-    let text = format!("codec = \"opus\"\nbitrate = 128\n{album_declarations}");
+fn parse_spec(collection_declarations: &str) -> LibraryBuildSpec {
+    let text = format!("codec = \"opus\"\nbitrate = 128\n{collection_declarations}");
     scarab::parse(&text).expect("test configuration must parse and validate")
 }
 
@@ -54,27 +54,30 @@ fn toml_string(path: &Path) -> String {
     escaped
 }
 
-fn find_configured_scope<'a>(scopes: &'a [RequiredScope], album_handle: &str) -> &'a RequiredScope {
+fn find_configured_scope<'a>(
+    scopes: &'a [RequiredScope],
+    collection_handle: &str,
+) -> &'a RequiredScope {
     scopes
         .iter()
         .find(|scope| match scope {
             RequiredScope::ConfiguredDirectory {
-                album_handle: handle,
+                collection_handle: handle,
                 ..
-            } => handle == album_handle,
+            } => handle == collection_handle,
             RequiredScope::DefaultSourceRoot { .. } => false,
         })
-        .unwrap_or_else(|| panic!("configured scope for album {album_handle} must exist"))
+        .unwrap_or_else(|| panic!("configured scope for collection {collection_handle} must exist"))
 }
 
 #[test]
-fn zero_albums_missing_unrelated_root_succeeds_empty() {
+fn zero_collections_missing_unrelated_root_succeeds_empty() {
     let sandbox = TempSandbox::new();
     let missing_root = sandbox.path().join("missing-root");
     let spec = parse_spec("");
 
     let result = build_observed_source_file_inventory(&spec, &missing_root)
-        .expect("zero albums must succeed");
+        .expect("zero collections must succeed");
 
     assert!(result.warnings().is_empty());
     assert!(result.inventory().covered_scopes().is_empty());
@@ -89,7 +92,7 @@ fn absolute_configured_only_scope_ignores_unusable_source_root() {
     fs::write(target.join("track.dat"), b"track").expect("write track");
     let missing_root = sandbox.path().join("missing-root");
     let spec = parse_spec(&format!(
-        "[albums.tool]\ndirectory = {}\n",
+        "[collections.tool]\ndirectory = {}\n",
         toml_string(&target)
     ));
 
@@ -103,11 +106,11 @@ fn absolute_configured_only_scope_ignores_unusable_source_root() {
     assert_eq!(scopes.len(), 1);
     match &scopes[0] {
         RequiredScope::ConfiguredDirectory {
-            album_handle,
+            collection_handle,
             resolved_directory,
             contributing_selectors,
         } => {
-            assert_eq!(album_handle, "tool");
+            assert_eq!(collection_handle, "tool");
             assert_eq!(resolved_directory, &canonical(&target));
             assert_eq!(contributing_selectors.len(), 1);
             assert_eq!(
@@ -133,9 +136,9 @@ fn shared_default_single_scope_with_declaration_ordered_dependents() {
     let source = create_source(&sandbox);
     fs::write(source.join("sentinel.txt"), b"sentinel").expect("write sentinel");
     let spec = parse_spec(
-        "[albums.z]\nname = \"Z\"\n\
-         [albums.a]\nname = \"A\"\n\
-         [albums.q]\nartist = \"Q\"\n",
+        "[collections.z]\nname = \"Z\"\n\
+         [collections.a]\nname = \"A\"\n\
+         [collections.q]\nartist = \"Q\"\n",
     );
 
     let snapshot = SourceTreeSnapshot::capture(&source);
@@ -150,11 +153,11 @@ fn shared_default_single_scope_with_declaration_ordered_dependents() {
         RequiredScope::DefaultSourceRoot {
             original_source_root,
             resolved_traversal_root,
-            dependent_album_handles,
+            dependent_collection_handles,
         } => {
             assert_eq!(original_source_root.as_os_str(), source.as_os_str());
             assert_eq!(resolved_traversal_root, &canonical(&source));
-            assert_eq!(dependent_album_handles, &["z", "a", "q"]);
+            assert_eq!(dependent_collection_handles, &["z", "a", "q"]);
         }
         other => panic!("expected default scope, got {other:?}"),
     }
@@ -176,8 +179,8 @@ fn mixed_empty_and_populated_scopes_both_stay_visible() {
     fs::write(populated.join("track.dat"), b"track").expect("write track");
     fs::create_dir(source.join("empty-album")).expect("create empty album");
     let spec = parse_spec(
-        "[albums.one]\ndirectory = \"populated\"\n\
-         [albums.two]\ndirectory = \"empty-album\"\n",
+        "[collections.one]\ndirectory = \"populated\"\n\
+         [collections.two]\ndirectory = \"empty-album\"\n",
     );
 
     let snapshot = SourceTreeSnapshot::capture(&source);
@@ -220,7 +223,7 @@ fn mixed_empty_and_populated_scopes_both_stay_visible() {
 }
 
 #[test]
-fn within_album_overlap_parent_and_nested_scopes() {
+fn parent_and_nested_scopes_within_one_collection_retain_reporting_associations() {
     let sandbox = TempSandbox::new();
     let source = create_source(&sandbox);
     let parent = source.join("parent");
@@ -228,7 +231,7 @@ fn within_album_overlap_parent_and_nested_scopes() {
     fs::create_dir_all(&child).expect("create parent and child");
     fs::write(parent.join("root.txt"), b"root").expect("write root file");
     fs::write(child.join("track.dat"), b"nested").expect("write nested file");
-    let spec = parse_spec("[albums.tool]\ndirectories = [\"parent\", \"parent/child\"]\n");
+    let spec = parse_spec("[collections.tool]\ndirectories = [\"parent\", \"parent/child\"]\n");
 
     let snapshot = SourceTreeSnapshot::capture(&source);
     let result = build_observed_source_file_inventory(&spec, &source);
@@ -262,15 +265,15 @@ fn within_album_overlap_parent_and_nested_scopes() {
 }
 
 #[test]
-fn across_album_overlap_equal_path_retains_both_scopes() {
+fn equal_path_across_collections_retains_both_reporting_scopes() {
     let sandbox = TempSandbox::new();
     let source = create_source(&sandbox);
     let shared = source.join("shared");
     fs::create_dir(&shared).expect("create shared");
     fs::write(shared.join("track.dat"), b"track").expect("write track");
     let spec = parse_spec(
-        "[albums.one]\ndirectory = \"shared\"\n\
-         [albums.two]\ndirectory = \"shared\"\n",
+        "[collections.one]\ndirectory = \"shared\"\n\
+         [collections.two]\ndirectory = \"shared\"\n",
     );
 
     let snapshot = SourceTreeSnapshot::capture(&source);
@@ -298,7 +301,9 @@ fn across_album_overlap_equal_path_retains_both_scopes() {
     let mut handles: Vec<&str> = observed_file
         .reporting_scopes()
         .map(|scope| match scope {
-            RequiredScope::ConfiguredDirectory { album_handle, .. } => album_handle.as_str(),
+            RequiredScope::ConfiguredDirectory {
+                collection_handle, ..
+            } => collection_handle.as_str(),
             RequiredScope::DefaultSourceRoot { .. } => panic!("expected configured scope"),
         })
         .collect();
@@ -313,7 +318,8 @@ fn duplicate_selectors_with_dot_spelling_keep_one_association() {
     let album = source.join("Album");
     fs::create_dir(&album).expect("create album");
     fs::write(album.join("track.dat"), b"track").expect("write track");
-    let spec = parse_spec("[albums.tool]\ndirectories = [\"Album\", \"Album/.\", \"Album\"]\n");
+    let spec =
+        parse_spec("[collections.tool]\ndirectories = [\"Album\", \"Album/.\", \"Album\"]\n");
 
     let snapshot = SourceTreeSnapshot::capture(&source);
     let result = build_observed_source_file_inventory(&spec, &source);
@@ -324,11 +330,11 @@ fn duplicate_selectors_with_dot_spelling_keep_one_association() {
     assert_eq!(scopes.len(), 1);
     match &scopes[0] {
         RequiredScope::ConfiguredDirectory {
-            album_handle,
+            collection_handle,
             resolved_directory,
             contributing_selectors,
         } => {
-            assert_eq!(album_handle, "tool");
+            assert_eq!(collection_handle, "tool");
             assert_eq!(resolved_directory, &canonical(&album));
             assert_eq!(contributing_selectors.len(), 3);
             assert_eq!(contributing_selectors[0].as_os_str(), OsStr::new("Album"));
@@ -339,7 +345,7 @@ fn duplicate_selectors_with_dot_spelling_keep_one_association() {
     }
     assert_eq!(success.warnings().len(), 1, "redundant group warns once");
     let warning = &success.warnings()[0];
-    assert_eq!(warning.album_handle, "tool");
+    assert_eq!(warning.collection_handle, "tool");
     assert_eq!(warning.resolved_directory, canonical(&album));
     assert_eq!(
         warning.contributing_selectors,
@@ -368,8 +374,8 @@ fn configured_and_default_equal_roots_share_observed_file_with_two_scopes() {
     let source = create_source(&sandbox);
     fs::write(source.join("track.dat"), b"track").expect("write track");
     let spec = parse_spec(
-        "[albums.one]\ndirectory = \".\"\n\
-         [albums.two]\nname = \"Two\"\n",
+        "[collections.one]\ndirectory = \".\"\n\
+         [collections.two]\nname = \"Two\"\n",
     );
 
     let snapshot = SourceTreeSnapshot::capture(&source);
@@ -412,12 +418,12 @@ fn file_content_and_configuration_blindness() {
     fs::write(album.join("notes.txt"), b"text notes").expect("write text");
     fs::write(album.join("alternate.ogg"), b"alternate extension").expect("write ogg");
     fs::write(album.join("no-extension"), b"raw bytes").expect("write extensionless");
-    // Inventory ignores file policy, metadata predicates, and track rules.
+    // Inventory ignores file policy, metadata predicates, and output rules.
     let spec = parse_spec(
         "[files]\ninclude = [\"flac\"]\nexclude = [\"txt\", \"jpg\"]\n\
-         [albums.tool]\ndirectory = \"Album\"\nname = \"Tool\"\nartist = \"Tool\"\n\
-         [[album_rules]]\nalbums = [\"tool\"]\nbitrate = 64\n\
-         [[track_rules]]\nalbum = \"tool\"\nrules = [{ track = \"invalid.flac\", exclude = true }]\n",
+         [collections.tool]\ndirectory = \"Album\"\nname = \"Tool\"\nartist = \"Tool\"\n\
+         [[collection_rules]]\ncollections = [\"tool\"]\nbitrate = 64\n\
+         [[track_rules]]\ncollection = \"tool\"\nrules = [{ track = \"invalid.flac\", exclude = true }]\n",
     );
 
     let snapshot = SourceTreeSnapshot::capture(&source);
@@ -462,7 +468,7 @@ fn hard_link_pathnames_stay_separate_observed_files() {
     // Fail rather than silently skip hard-link coverage.
     fs::hard_link(&original, &link).expect("create hard link");
 
-    let spec = parse_spec("[albums.tool]\ndirectory = \"Album\"\n");
+    let spec = parse_spec("[collections.tool]\ndirectory = \"Album\"\n");
 
     let snapshot = SourceTreeSnapshot::capture(&source);
     let result = build_observed_source_file_inventory(&spec, &source);
@@ -507,8 +513,9 @@ fn warning_on_success_retains_full_redundancy() {
     let album = source.join("Stupid Dream");
     fs::create_dir(&album).expect("create album");
     fs::write(album.join("track.dat"), b"track").expect("write track");
-    let spec =
-        parse_spec("[albums.stupid-dream]\ndirectories = [\"Stupid Dream\", \"Stupid Dream\"]\n");
+    let spec = parse_spec(
+        "[collections.stupid-dream]\ndirectories = [\"Stupid Dream\", \"Stupid Dream\"]\n",
+    );
 
     let snapshot = SourceTreeSnapshot::capture(&source);
     let result = build_observed_source_file_inventory(&spec, &source);
@@ -517,7 +524,7 @@ fn warning_on_success_retains_full_redundancy() {
 
     assert_eq!(success.warnings().len(), 1);
     let warning = &success.warnings()[0];
-    assert_eq!(warning.album_handle, "stupid-dream");
+    assert_eq!(warning.collection_handle, "stupid-dream");
     assert_eq!(warning.resolved_directory, canonical(&album));
     assert_eq!(warning.contributing_selectors.len(), 2);
     assert_eq!(
@@ -551,10 +558,10 @@ fn preparation_failure_retains_configured_default_and_warning_without_inventory(
     let missing_two = sandbox.path().join("missing-two");
     let missing_root = sandbox.path().join("missing-root");
     let spec = parse_spec(&format!(
-        "[albums.good]\ndirectories = [{}, {}]\n\
-         [albums.bad-one]\ndirectory = {}\n\
-         [albums.bad-two]\ndirectory = {}\n\
-         [albums.dependent]\nname = \"Dependent\"\n",
+        "[collections.good]\ndirectories = [{}, {}]\n\
+         [collections.bad-one]\ndirectory = {}\n\
+         [collections.bad-two]\ndirectory = {}\n\
+         [collections.dependent]\nname = \"Dependent\"\n",
         toml_string(&existing),
         toml_string(&existing),
         toml_string(&missing_one),
@@ -577,26 +584,26 @@ fn preparation_failure_retains_configured_default_and_warning_without_inventory(
                 2,
                 "both missing selectors stay separate"
             );
-            assert_eq!(configured_failures[0].album_handle, "bad-one");
+            assert_eq!(configured_failures[0].collection_handle, "bad-one");
             assert_eq!(
                 configured_failures[0].configured_selector.as_os_str(),
                 missing_one.as_os_str()
             );
-            assert_eq!(configured_failures[1].album_handle, "bad-two");
+            assert_eq!(configured_failures[1].collection_handle, "bad-two");
             assert_eq!(
                 configured_failures[1].configured_selector.as_os_str(),
                 missing_two.as_os_str()
             );
             let default = default_source_root_failure
                 .as_ref()
-                .expect("dependent album must fail on the missing root");
+                .expect("dependent collection must fail on the missing root");
             assert_eq!(
                 default.original_source_root.as_os_str(),
                 missing_root.as_os_str()
             );
-            assert_eq!(default.dependent_album_handles, ["dependent"]);
+            assert_eq!(default.dependent_collection_handles, ["dependent"]);
             assert_eq!(warnings.len(), 1, "successful group still warns on failure");
-            assert_eq!(warnings[0].album_handle, "good");
+            assert_eq!(warnings[0].collection_handle, "good");
             assert_eq!(warnings[0].resolved_directory, canonical(&existing));
             assert_eq!(warnings[0].contributing_selectors.len(), 2);
             assert_eq!(
@@ -623,18 +630,18 @@ fn preparation_failure_retains_configured_default_and_warning_without_inventory(
 #[test]
 fn public_diagnostic_vocabulary_constructs_and_matches_externally() {
     let warning = RedundantConfiguredSelectors {
-        album_handle: "tool".to_owned(),
+        collection_handle: "tool".to_owned(),
         resolved_directory: PathBuf::from("/music/album"),
         contributing_selectors: vec![PathBuf::from("Album"), PathBuf::from("Album")],
     };
     let configured = ConfiguredSelectorFailure {
-        album_handle: "tool".to_owned(),
+        collection_handle: "tool".to_owned(),
         configured_selector: PathBuf::from("missing"),
         error: io::Error::new(io::ErrorKind::NotFound, "missing"),
     };
     let default = DefaultSourceRootFailure {
         original_source_root: PathBuf::from("source"),
-        dependent_album_handles: vec!["dependent".to_owned()],
+        dependent_collection_handles: vec!["dependent".to_owned()],
         kind: DefaultSourceRootFailureKind::EmptyInput,
     };
     // `DefaultSourceRootFailureKind` stays non-exhaustive downstream.
@@ -652,7 +659,7 @@ fn public_diagnostic_vocabulary_constructs_and_matches_externally() {
         scope: RequiredScope::DefaultSourceRoot {
             original_source_root: PathBuf::from("source"),
             resolved_traversal_root: PathBuf::from("/music/source"),
-            dependent_album_handles: vec!["dependent".to_owned()],
+            dependent_collection_handles: vec!["dependent".to_owned()],
         },
         error: DiscoveryError::NotADirectory {
             path: PathBuf::from("/music/source"),
@@ -704,7 +711,7 @@ mod unix {
         ];
         let name = OsString::from_vec(raw.clone());
         fs::write(album.join(&name), b"bytes").expect("write non-utf8 file");
-        let spec = parse_spec("[albums.tool]\ndirectory = \"Album\"\n");
+        let spec = parse_spec("[collections.tool]\ndirectory = \"Album\"\n");
 
         let snapshot = SourceTreeSnapshot::capture(&source);
         let result = build_observed_source_file_inventory(&spec, &source);
@@ -742,7 +749,7 @@ mod unix {
         symlink(outside.join("outside.dat"), real.join("linked-file.dat"))
             .expect("create descendant file symlink");
         symlink(&outside, real.join("linked-dir")).expect("create descendant dir symlink");
-        let spec = parse_spec("[albums.tool]\ndirectory = \"link\"\n");
+        let spec = parse_spec("[collections.tool]\ndirectory = \"link\"\n");
 
         let snapshot = SourceTreeSnapshot::capture(&source);
         let result = build_observed_source_file_inventory(&spec, &source);

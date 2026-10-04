@@ -4,16 +4,17 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! Resolution of one explicit configured album-directory selector.
+//! Resolution of one explicit configured directory selector.
 //!
-//! [`resolve_album_directory`] interprets one configured selector against one
+//! [`resolve_directory_selector`] interprets one configured selector against one
 //! source root, resolves the effective pathname through the native filesystem,
 //! and verifies that a subsequent metadata lookup reports it as a directory.
 //!
-//! The primitive is deliberately narrow. It does not iterate album
-//! declarations, accumulate failures across declarations, default a scope for
-//! an undeclared selector, associate files with scopes, interpret metadata, or
-//! decide album membership. It reports only that canonicalization produced a
+//! It does not iterate collection declarations, accumulate
+//! failures across declarations, prepare default scopes for declarations without directory
+//! selectors, associate files with scopes, interpret metadata, or decide collection membership.
+//!
+//! It reports only that canonicalization produced a
 //! pathname and that a subsequent metadata lookup through that pathname
 //! reported a directory. Continuing object identity, readability, containment
 //! within the source root, and later pathname stability are not established.
@@ -33,7 +34,7 @@ use std::path::PathBuf;
 #[cfg(windows)]
 use std::path::{Component, Prefix};
 
-/// Resolves one configured album-directory selector against one
+/// Resolves one configured directory selector against one
 /// `source_root`.
 ///
 /// A nonempty absolute `configured_directory` is resolved as spelled and never
@@ -55,11 +56,11 @@ use std::path::{Component, Prefix};
 ///
 /// Successful resolution does not establish containment within `source_root`,
 /// continuing object identity, readability, or later pathname stability.
-pub fn resolve_album_directory(
+pub fn resolve_directory_selector(
     source_root: &Path,
     configured_directory: &Path,
 ) -> io::Result<PathBuf> {
-    let effective_path = effective_album_directory(source_root, configured_directory)?;
+    let effective_path = effective_directory_selector_path(source_root, configured_directory)?;
     let resolved_path = fs::canonicalize(&effective_path)?;
     let metadata = fs::metadata(&resolved_path)?;
 
@@ -76,16 +77,16 @@ pub fn resolve_album_directory(
 /// Builds the effective pathname for one configured selector without touching
 /// the filesystem.
 ///
-/// Absolute configured directories never inspect the source root.
-/// Relative configured directories are joined to the source root.
-fn effective_album_directory(
+/// Absolute configured selectors are used as spelled without inspecting the source root.
+/// Relative configured selectors are joined to the source root.
+fn effective_directory_selector_path(
     source_root: &Path,
     configured_directory: &Path,
 ) -> io::Result<PathBuf> {
     if configured_directory.as_os_str().is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "album directory selector is empty",
+            "directory selector is empty",
         ));
     }
 
@@ -103,14 +104,14 @@ fn effective_album_directory(
         if configured_directory.has_root() || component_prefix(configured_directory).is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "album directory selector is not source-root-relative",
+                "directory selector is not source-root-relative",
             ));
         }
 
         if !is_supported_anchor(source_root) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "source root is not a supported anchor for a relative album directory selector",
+                "source root is not a supported anchor for a relative directory selector",
             ));
         }
     }
@@ -147,7 +148,7 @@ mod tests {
     use std::ffi::OsStr;
     use std::ffi::OsString;
 
-    const EMPTY_SELECTOR_MESSAGE: &str = "album directory selector is empty";
+    const EMPTY_SELECTOR_MESSAGE: &str = "directory selector is empty";
 
     /// The raw spelling of `selector` appended to a nonempty `source_root`
     /// using the host separator, independent of `Path::join`.
@@ -181,7 +182,7 @@ mod tests {
         ];
 
         for source_root in source_roots {
-            let error = effective_album_directory(source_root, Path::new(""))
+            let error = effective_directory_selector_path(source_root, Path::new(""))
                 .expect_err("empty selector must be rejected");
             assert_synthetic_error(&error, io::ErrorKind::InvalidInput, EMPTY_SELECTOR_MESSAGE);
         }
@@ -189,7 +190,7 @@ mod tests {
 
     #[test]
     fn ordinary_relative_selector_is_joined_to_supplied_anchor() {
-        let effective = effective_album_directory(
+        let effective = effective_directory_selector_path(
             Path::new("relative/root"),
             Path::new("Porcupine Tree/Fear of a Blank Planet"),
         )
@@ -203,8 +204,9 @@ mod tests {
 
     #[test]
     fn ordinary_relative_source_root_is_accepted() {
-        let effective = effective_album_directory(Path::new("music/root"), Path::new("Lateralus"))
-            .expect("ordinary relative source root must be admitted");
+        let effective =
+            effective_directory_selector_path(Path::new("music/root"), Path::new("Lateralus"))
+                .expect("ordinary relative source root must be admitted");
 
         assert_eq!(
             effective.as_os_str(),
@@ -214,7 +216,7 @@ mod tests {
 
     #[test]
     fn empty_source_root_leaves_relative_selector_relative() {
-        let effective = effective_album_directory(Path::new(""), Path::new("Ænima"))
+        let effective = effective_directory_selector_path(Path::new(""), Path::new("Ænima"))
             .expect("empty source root must be admitted");
 
         assert_eq!(effective.as_os_str(), OsStr::new("Ænima"));
@@ -230,8 +232,11 @@ mod tests {
         ];
 
         for selector in selectors {
-            let effective = effective_album_directory(Path::new("root"), Path::new(selector))
-                .unwrap_or_else(|error| panic!("selector {selector:?} must be admitted: {error}"));
+            let effective =
+                effective_directory_selector_path(Path::new("root"), Path::new(selector))
+                    .unwrap_or_else(|error| {
+                        panic!("selector {selector:?} must be admitted: {error}")
+                    });
             assert_eq!(
                 effective.as_os_str(),
                 joined_spelling("root", selector).as_os_str(),
@@ -242,7 +247,7 @@ mod tests {
 
     #[test]
     fn whitespace_only_selector_is_admitted_and_preserved() {
-        let effective = effective_album_directory(Path::new("root"), Path::new("   "))
+        let effective = effective_directory_selector_path(Path::new("root"), Path::new("   "))
             .expect("whitespace-only selector must not be treated as empty");
 
         assert_eq!(
@@ -269,7 +274,7 @@ mod tests {
         // rejected for a relative selector. An absolute selector must ignore
         // the anchor completely.
         for source_root in [Path::new(""), Path::new(r"\root-relative")] {
-            let effective = effective_album_directory(source_root, selector)
+            let effective = effective_directory_selector_path(source_root, selector)
                 .expect("absolute selector must be admitted");
             assert_eq!(effective.as_os_str(), selector.as_os_str());
         }
@@ -277,7 +282,7 @@ mod tests {
 
     #[cfg(windows)]
     mod windows {
-        use super::super::effective_album_directory;
+        use super::super::effective_directory_selector_path;
         use super::assert_synthetic_error;
         use super::joined_spelling;
         use std::ffi::OsStr;
@@ -286,9 +291,9 @@ mod tests {
         use std::path::Path;
         use std::path::Prefix;
 
-        const SELECTOR_MESSAGE: &str = "album directory selector is not source-root-relative";
+        const SELECTOR_MESSAGE: &str = "directory selector is not source-root-relative";
         const ANCHOR_MESSAGE: &str =
-            "source root is not a supported anchor for a relative album directory selector";
+            "source root is not a supported anchor for a relative directory selector";
 
         /// The parsed prefix of `path`'s first component, from native parsing.
         fn native_prefix(path: &Path) -> Option<Prefix<'_>> {
@@ -310,13 +315,13 @@ mod tests {
         }
 
         fn assert_selector_rejected(source_root: &Path, selector: &Path) {
-            let error = effective_album_directory(source_root, selector)
+            let error = effective_directory_selector_path(source_root, selector)
                 .expect_err("unsupported configured selector must be rejected");
             assert_synthetic_error(&error, io::ErrorKind::InvalidInput, SELECTOR_MESSAGE);
         }
 
         fn assert_anchor_rejected(source_root: &Path) {
-            let error = effective_album_directory(source_root, Path::new("Lateralus"))
+            let error = effective_directory_selector_path(source_root, Path::new("Lateralus"))
                 .expect_err("unsupported source-root anchor must be rejected");
             assert_synthetic_error(&error, io::ErrorKind::InvalidInput, ANCHOR_MESSAGE);
         }
@@ -377,8 +382,9 @@ mod tests {
             let pairs = [(r"C:", r"C:foo"), (r"\rooted", r"\foo")];
 
             for (anchor, selector) in pairs {
-                let error = effective_album_directory(Path::new(anchor), Path::new(selector))
-                    .expect_err("both the selector and the anchor are unsupported");
+                let error =
+                    effective_directory_selector_path(Path::new(anchor), Path::new(selector))
+                        .expect_err("both the selector and the anchor are unsupported");
                 assert_synthetic_error(&error, io::ErrorKind::InvalidInput, SELECTOR_MESSAGE);
             }
         }
@@ -412,8 +418,9 @@ mod tests {
                     None => assert!(!source_root.has_root(), "{literal:?} must have no root"),
                 }
 
-                let effective = effective_album_directory(source_root, Path::new("Lateralus"))
-                    .unwrap_or_else(|error| panic!("{literal:?} must anchor: {error}"));
+                let effective =
+                    effective_directory_selector_path(source_root, Path::new("Lateralus"))
+                        .unwrap_or_else(|error| panic!("{literal:?} must anchor: {error}"));
                 assert_eq!(
                     effective.as_os_str(),
                     joined_spelling(literal, "Lateralus").as_os_str(),
@@ -465,7 +472,7 @@ mod tests {
                     .unwrap_or_else(|| panic!("{literal:?} must have a prefix"));
                 assert_eq!(prefix_category(prefix), category, "category of {literal:?}");
 
-                let effective = effective_album_directory(rejected_anchor, selector)
+                let effective = effective_directory_selector_path(rejected_anchor, selector)
                     .unwrap_or_else(|error| panic!("{literal:?} must be admitted: {error}"));
                 assert_eq!(
                     effective.as_os_str(),
@@ -493,7 +500,7 @@ mod tests {
                 selector.is_absolute(),
                 "test precondition from native classification"
             );
-            let effective = effective_album_directory(Path::new("C:"), selector)
+            let effective = effective_directory_selector_path(Path::new("C:"), selector)
                 .expect("absolute selector must be admitted");
             assert_eq!(effective.as_os_str(), selector.as_os_str());
 

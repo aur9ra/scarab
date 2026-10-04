@@ -6,18 +6,21 @@
 
 //! Parsing and validation of Scarab's TOML configuration, filesystem discovery
 //! and scope preparation, observed source file inventory, source-audio classification,
-//! ffprobe metadata probing, and album-directory resolution.
+//! ffprobe metadata probing, and directory-selector resolution.
 //!
 //! [`parse`] deserializes TOML text into the validated [`LibraryBuildSpec`]
 //! model or reports the first problem it finds. Ambiguity, such as a rule
 //! applied twice, is rejected instead of being decided by declaration order.
 //!
-//! Albums may declare metadata selectors and optional directory selectors.
+//! Collection declarations describe membership criteria. A declaration's
+//! `name` and `artist` fields remain metadata selectors, while `directory` and
+//! `directories` select source paths.
 //!
 //! [`discover_source_files`] recursively collects ordinary files under one
-//! source root. [`resolve_album_directory`] resolves one configured directory
-//! selector against a source root and verifies its target is a directory. The
-//! private `album_scope` module prepares configured directory-selector scopes.
+//! source root. [`resolve_directory_selector`] resolves one configured
+//! directory selector against a source root and verifies its target is a
+//! directory. The private `collection_scope` module prepares filesystem scopes on behalf of
+//! collection declarations.
 //! Declarations without directory selectors share one default source-root scope,
 //! if any. `required_discovery` scans prepared scopes, and
 //! [`build_observed_source_file_inventory`]
@@ -30,12 +33,12 @@
 //! supplied path's final extension. [`probe_source_file`] requests ffprobe
 //! format metadata for its supplied path and requires no prior classification.
 //! Discovery, classification, and probing are distinct capabilities. None
-//! establishes album membership.
+//! establishes collection membership.
 
-mod album_directory;
-mod album_scope;
 mod collection_membership;
+mod collection_scope;
 mod config;
+mod directory_selector;
 mod discovery;
 mod observed_source_file_inventory;
 mod probe;
@@ -44,11 +47,12 @@ mod source_audio;
 #[cfg(test)]
 mod test_support;
 
-pub use album_directory::resolve_album_directory;
 pub use config::{
-    Album, AlbumRule, Codec, EncodingProfile, Files, InvalidLibraryBuildSpec, LibraryBuildSpec,
-    LibraryBuildSpecError, SizeMode, TrackAction, TrackRule, TrackRuleGroup, TrackTarget, parse,
+    Codec, CollectionDeclaration, CollectionRule, EncodingProfile, FilesConfig,
+    InvalidLibraryBuildSpec, LibraryBuildSpec, LibraryBuildSpecError, SizeMode, TrackAction,
+    TrackRule, TrackRuleGroup, TrackTarget, parse,
 };
+pub use directory_selector::resolve_directory_selector;
 pub use discovery::{DiscoveryError, discover_source_files};
 pub use observed_source_file_inventory::{
     ConfiguredSelectorFailure, DefaultSourceRootFailure, DefaultSourceRootFailureKind,

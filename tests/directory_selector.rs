@@ -4,33 +4,33 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! Integration tests for explicit configured album-directory resolution.
+//! Integration tests for explicit configured directory-selector resolution.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use scarab::resolve_album_directory;
+use scarab::resolve_directory_selector;
 
 mod common;
 
 use common::{SourceTreeSnapshot, TempSandbox};
 
-const EMPTY_SELECTOR_MESSAGE: &str = "album directory selector is empty";
+const EMPTY_SELECTOR_MESSAGE: &str = "directory selector is empty";
 const NOT_A_DIRECTORY_MESSAGE: &str = "resolved target is not a directory";
 
-/// Resolves one album-directory selector while asserting the enclosing
+/// Resolves one directory selector while asserting the enclosing
 /// sandbox is untouched.
 ///
 /// The resolver result is not inspected until the immutability check has
 /// completed.
-fn resolve_album_directory_and_assert_unchanged(
+fn resolve_directory_selector_and_assert_unchanged(
     sandbox: &TempSandbox,
     source_root: &Path,
     configured_directory: &Path,
 ) -> io::Result<PathBuf> {
     let snapshot = SourceTreeSnapshot::capture(sandbox.path());
-    let result = resolve_album_directory(source_root, configured_directory);
+    let result = resolve_directory_selector(source_root, configured_directory);
     snapshot.assert_unchanged();
     result
 }
@@ -68,7 +68,7 @@ fn assert_native_canonicalize_error(error: &io::Error, effective: &Path) {
     );
 }
 
-/// Creates an temporary Sandbox with `sentinel.txt` and return the PathBuf to the sandbox.
+/// Creates a `source` directory with `sentinel.txt` inside `sandbox` and returns its path.
 fn create_source(sandbox: &TempSandbox) -> PathBuf {
     let source = sandbox.path().join("source");
     fs::create_dir(&source).expect("create source root");
@@ -84,7 +84,7 @@ fn relative_selector_naming_existing_directory_resolves() {
     fs::create_dir(&album).expect("create album");
 
     let resolved =
-        resolve_album_directory_and_assert_unchanged(&sandbox, &source, Path::new("Lateralus"))
+        resolve_directory_selector_and_assert_unchanged(&sandbox, &source, Path::new("Lateralus"))
             .expect("relative existing directory must resolve");
     assert_eq!(resolved, canonical(&album));
 }
@@ -94,8 +94,9 @@ fn explicit_current_directory_selector_resolves_to_source_root() {
     let sandbox = TempSandbox::new();
     let source = create_source(&sandbox);
 
-    let resolved = resolve_album_directory_and_assert_unchanged(&sandbox, &source, Path::new("."))
-        .expect("explicit `.` must resolve");
+    let resolved =
+        resolve_directory_selector_and_assert_unchanged(&sandbox, &source, Path::new("."))
+            .expect("explicit `.` must resolve");
     assert_eq!(resolved, canonical(&source));
 }
 
@@ -108,7 +109,7 @@ fn parent_selector_resolves_a_sibling_outside_the_source_root() {
     fs::write(sibling.join("sibling-sentinel.txt"), b"sibling").expect("write sibling sentinel");
 
     let resolved =
-        resolve_album_directory_and_assert_unchanged(&sandbox, &source, Path::new("../sibling"))
+        resolve_directory_selector_and_assert_unchanged(&sandbox, &source, Path::new("../sibling"))
             .expect("`../sibling` must resolve");
     assert_eq!(resolved, canonical(&sibling));
 }
@@ -120,7 +121,7 @@ fn absolute_selector_resolves_existing_directory() {
     let target = sandbox.path().join("absolute-target");
     fs::create_dir(&target).expect("create target");
 
-    let resolved = resolve_album_directory_and_assert_unchanged(&sandbox, &source, &target)
+    let resolved = resolve_directory_selector_and_assert_unchanged(&sandbox, &source, &target)
         .expect("absolute existing directory must resolve");
     assert_eq!(resolved, canonical(&target));
 }
@@ -133,8 +134,9 @@ fn absolute_selector_ignores_nonexistent_source_root() {
     fs::create_dir(&target).expect("create target");
     fs::write(target.join("sentinel.txt"), b"target sentinel").expect("write sentinel");
 
-    let resolved = resolve_album_directory_and_assert_unchanged(&sandbox, &missing_source, &target)
-        .expect("absolute selector must not depend on the source root");
+    let resolved =
+        resolve_directory_selector_and_assert_unchanged(&sandbox, &missing_source, &target)
+            .expect("absolute selector must not depend on the source root");
     assert_eq!(resolved, canonical(&target));
 }
 
@@ -147,7 +149,7 @@ fn absolute_selector_ignores_an_ordinary_file_source_root() {
     fs::create_dir(&target).expect("create target");
     fs::write(target.join("sentinel.txt"), b"target sentinel").expect("write sentinel");
 
-    let resolved = resolve_album_directory_and_assert_unchanged(&sandbox, &file_source, &target)
+    let resolved = resolve_directory_selector_and_assert_unchanged(&sandbox, &file_source, &target)
         .expect("absolute selector must not depend on the source root");
     assert_eq!(resolved, canonical(&target));
 }
@@ -159,7 +161,7 @@ fn directory_name_with_ordinary_spaces_resolves() {
     let album = source.join("Fear of a Blank Planet");
     fs::create_dir(&album).expect("create spaced album");
 
-    let resolved = resolve_album_directory_and_assert_unchanged(
+    let resolved = resolve_directory_selector_and_assert_unchanged(
         &sandbox,
         &source,
         Path::new("Fear of a Blank Planet"),
@@ -174,7 +176,7 @@ fn ordinary_file_terminal_target_is_synthetic_not_a_directory() {
     let source = create_source(&sandbox);
     fs::write(source.join("Anesthetize.flac"), b"audio").expect("write track");
 
-    let error = resolve_album_directory_and_assert_unchanged(
+    let error = resolve_directory_selector_and_assert_unchanged(
         &sandbox,
         &source,
         Path::new("Anesthetize.flac"),
@@ -194,7 +196,7 @@ fn missing_target_preserves_native_canonicalize_error() {
     let effective = source.join("missing");
 
     let error =
-        resolve_album_directory_and_assert_unchanged(&sandbox, &source, Path::new("missing"))
+        resolve_directory_selector_and_assert_unchanged(&sandbox, &source, Path::new("missing"))
             .expect_err("missing target must fail");
     assert_native_canonicalize_error(&error, &effective);
 }
@@ -206,7 +208,7 @@ fn non_directory_intermediate_component_preserves_native_canonicalize_error() {
     fs::write(source.join("Anesthetize.flac"), b"audio").expect("write track");
     let effective = source.join("Anesthetize.flac/inner");
 
-    let error = resolve_album_directory_and_assert_unchanged(
+    let error = resolve_directory_selector_and_assert_unchanged(
         &sandbox,
         &source,
         Path::new("Anesthetize.flac/inner"),
@@ -220,7 +222,7 @@ fn empty_selector_through_public_api_is_synthetic_invalid_input() {
     let sandbox = TempSandbox::new();
     let source = create_source(&sandbox);
 
-    let error = resolve_album_directory_and_assert_unchanged(&sandbox, &source, Path::new(""))
+    let error = resolve_directory_selector_and_assert_unchanged(&sandbox, &source, Path::new(""))
         .expect_err("empty selector must be rejected");
     assert_synthetic_error(&error, io::ErrorKind::InvalidInput, EMPTY_SELECTOR_MESSAGE);
 }
@@ -228,14 +230,14 @@ fn empty_selector_through_public_api_is_synthetic_invalid_input() {
 #[test]
 fn empty_source_root_with_current_directory_selector_uses_process_cwd() {
     // No fixture is created in the test process cwd and the cwd is unchanged.
-    let resolved = resolve_album_directory(Path::new(""), Path::new("."))
+    let resolved = resolve_directory_selector(Path::new(""), Path::new("."))
         .expect("`.` in the process cwd must resolve");
     assert_eq!(resolved, canonical(Path::new(".")));
 }
 
 #[test]
 fn dot_source_root_with_current_directory_selector_uses_process_cwd() {
-    let resolved = resolve_album_directory(Path::new("."), Path::new("."))
+    let resolved = resolve_directory_selector(Path::new("."), Path::new("."))
         .expect("`.` in the process cwd must resolve");
     assert_eq!(resolved, canonical(Path::new(".")));
 }
@@ -252,7 +254,7 @@ mod unix {
     use super::{
         NOT_A_DIRECTORY_MESSAGE, TempSandbox, assert_native_canonicalize_error,
         assert_synthetic_error, canonical, create_source,
-        resolve_album_directory_and_assert_unchanged,
+        resolve_directory_selector_and_assert_unchanged,
     };
 
     #[test]
@@ -264,7 +266,7 @@ mod unix {
         fs::write(real.join("disc/sentinel.txt"), b"sentinel").expect("write sentinel");
         symlink(&real, source.join("album-link")).expect("create album symlink");
 
-        let resolved = resolve_album_directory_and_assert_unchanged(
+        let resolved = resolve_directory_selector_and_assert_unchanged(
             &sandbox,
             &source,
             Path::new("album-link/disc"),
@@ -282,7 +284,7 @@ mod unix {
         fs::write(real.join("sentinel.txt"), b"sentinel").expect("write sentinel");
         symlink(&real, source.join("album-link")).expect("create album symlink");
 
-        let resolved = resolve_album_directory_and_assert_unchanged(
+        let resolved = resolve_directory_selector_and_assert_unchanged(
             &sandbox,
             &source,
             Path::new("album-link"),
@@ -301,7 +303,7 @@ mod unix {
         symlink(&real, source.join("album-link")).expect("create album symlink");
 
         for spelling in ["album-link/", "album-link/."] {
-            let resolved = resolve_album_directory_and_assert_unchanged(
+            let resolved = resolve_directory_selector_and_assert_unchanged(
                 &sandbox,
                 &source,
                 Path::new(spelling),
@@ -320,7 +322,7 @@ mod unix {
         fs::write(sibling.join("sentinel.txt"), b"sibling").expect("write sentinel");
         symlink(&sibling, source.join("escape-link")).expect("create escape symlink");
 
-        let resolved = resolve_album_directory_and_assert_unchanged(
+        let resolved = resolve_directory_selector_and_assert_unchanged(
             &sandbox,
             &source,
             Path::new("escape-link"),
@@ -339,7 +341,7 @@ mod unix {
         let link_root = sandbox.path().join("link-root");
         symlink(&real_root, &link_root).expect("create root symlink");
 
-        let resolved = resolve_album_directory_and_assert_unchanged(
+        let resolved = resolve_directory_selector_and_assert_unchanged(
             &sandbox,
             &link_root,
             Path::new("Lateralus"),
@@ -361,9 +363,12 @@ mod unix {
         fs::write(target.join("sentinel.txt"), b"target").expect("write target sentinel");
         symlink(&child, source.join("link")).expect("create child symlink");
 
-        let resolved =
-            resolve_album_directory_and_assert_unchanged(&sandbox, &source, Path::new("link/.."))
-                .expect("symlink parent traversal must resolve");
+        let resolved = resolve_directory_selector_and_assert_unchanged(
+            &sandbox,
+            &source,
+            Path::new("link/.."),
+        )
+        .expect("symlink parent traversal must resolve");
         assert_eq!(resolved, canonical(&target));
         assert_ne!(
             resolved,
@@ -380,7 +385,7 @@ mod unix {
         fs::write(&file, b"audio").expect("write track");
         symlink(&file, source.join("track-link")).expect("create track symlink");
 
-        let error = resolve_album_directory_and_assert_unchanged(
+        let error = resolve_directory_selector_and_assert_unchanged(
             &sandbox,
             &source,
             Path::new("track-link"),
@@ -400,7 +405,7 @@ mod unix {
         symlink(source.join("missing"), source.join("broken-link")).expect("create broken symlink");
         let effective = source.join("broken-link");
 
-        let error = resolve_album_directory_and_assert_unchanged(
+        let error = resolve_directory_selector_and_assert_unchanged(
             &sandbox,
             &source,
             Path::new("broken-link"),
@@ -418,7 +423,7 @@ mod unix {
         let effective = source.join("loop-a");
 
         let error =
-            resolve_album_directory_and_assert_unchanged(&sandbox, &source, Path::new("loop-a"))
+            resolve_directory_selector_and_assert_unchanged(&sandbox, &source, Path::new("loop-a"))
                 .expect_err("symlink loop must fail natively");
         assert_native_canonicalize_error(&error, &effective);
     }
@@ -433,7 +438,7 @@ mod unix {
         fs::write(album.join("sentinel.txt"), b"sentinel").expect("write sentinel");
 
         let resolved =
-            resolve_album_directory_and_assert_unchanged(&sandbox, &source, Path::new(&name))
+            resolve_directory_selector_and_assert_unchanged(&sandbox, &source, Path::new(&name))
                 .expect("non-UTF-8 directory name must resolve");
         assert_eq!(resolved, canonical(&album));
     }
@@ -447,7 +452,7 @@ mod unix {
         fs::write(album.join("sentinel.txt"), b"sentinel").expect("write sentinel");
 
         let resolved =
-            resolve_album_directory_and_assert_unchanged(&sandbox, &source, Path::new("   "))
+            resolve_directory_selector_and_assert_unchanged(&sandbox, &source, Path::new("   "))
                 .expect("whitespace-only directory name must resolve");
         assert_eq!(resolved, canonical(&album));
     }
@@ -466,7 +471,7 @@ mod unix {
 
         for name in names {
             let resolved =
-                resolve_album_directory_and_assert_unchanged(&sandbox, &source, Path::new(name))
+                resolve_directory_selector_and_assert_unchanged(&sandbox, &source, Path::new(name))
                     .unwrap_or_else(|error| {
                         panic!("{name:?} must resolve as a Unix name: {error}")
                     });
@@ -483,12 +488,12 @@ mod windows {
 
     use super::{
         TempSandbox, assert_synthetic_error, canonical, create_source,
-        resolve_album_directory_and_assert_unchanged,
+        resolve_directory_selector_and_assert_unchanged,
     };
 
-    const SELECTOR_MESSAGE: &str = "album directory selector is not source-root-relative";
+    const SELECTOR_MESSAGE: &str = "directory selector is not source-root-relative";
     const ANCHOR_MESSAGE: &str =
-        "source root is not a supported anchor for a relative album directory selector";
+        "source root is not a supported anchor for a relative directory selector";
 
     #[test]
     fn supported_relative_selector_resolves_existing_directory() {
@@ -498,9 +503,12 @@ mod windows {
         fs::create_dir(&album).expect("create album");
         fs::write(album.join("sentinel.txt"), b"sentinel").expect("write sentinel");
 
-        let resolved =
-            resolve_album_directory_and_assert_unchanged(&sandbox, &source, Path::new("Lateralus"))
-                .expect("ordinary relative anchoring must succeed");
+        let resolved = resolve_directory_selector_and_assert_unchanged(
+            &sandbox,
+            &source,
+            Path::new("Lateralus"),
+        )
+        .expect("ordinary relative anchoring must succeed");
         assert_eq!(resolved, canonical(&album));
     }
 
@@ -510,7 +518,7 @@ mod windows {
         let _source = create_source(&sandbox);
 
         for literal in [r"\foo", "/foo", "C:foo", "C:"] {
-            let error = resolve_album_directory_and_assert_unchanged(
+            let error = resolve_directory_selector_and_assert_unchanged(
                 &sandbox,
                 Path::new("ordinary"),
                 Path::new(literal),
@@ -536,7 +544,7 @@ mod windows {
         ];
 
         for literal in rejected {
-            let error = resolve_album_directory_and_assert_unchanged(
+            let error = resolve_directory_selector_and_assert_unchanged(
                 &sandbox,
                 Path::new(literal),
                 Path::new("Lateralus"),
@@ -564,11 +572,12 @@ mod windows {
         ];
 
         for anchor in rejected_anchors {
-            let resolved =
-                resolve_album_directory_and_assert_unchanged(&sandbox, Path::new(anchor), &target)
-                    .unwrap_or_else(|error| {
-                        panic!("absolute target with anchor {anchor:?}: {error}")
-                    });
+            let resolved = resolve_directory_selector_and_assert_unchanged(
+                &sandbox,
+                Path::new(anchor),
+                &target,
+            )
+            .unwrap_or_else(|error| panic!("absolute target with anchor {anchor:?}: {error}"));
             assert_eq!(resolved, canonical(&target), "anchor {anchor:?}");
         }
     }
@@ -581,14 +590,17 @@ mod windows {
         fs::create_dir(&album).expect("create album");
         fs::write(album.join("sentinel.txt"), b"sentinel").expect("write sentinel");
 
-        let resolved =
-            resolve_album_directory_and_assert_unchanged(&sandbox, &source, Path::new("Lateralus"))
-                .expect("relative selector must resolve");
+        let resolved = resolve_directory_selector_and_assert_unchanged(
+            &sandbox,
+            &source,
+            Path::new("Lateralus"),
+        )
+        .expect("relative selector must resolve");
         assert_eq!(resolved, canonical(&album));
         assert!(resolved.is_absolute(), "canonical output must be absolute");
 
         // A real canonicalization output is admitted as an absolute selector.
-        let again = resolve_album_directory_and_assert_unchanged(&sandbox, &source, &resolved)
+        let again = resolve_directory_selector_and_assert_unchanged(&sandbox, &source, &resolved)
             .expect("canonicalized output must be admitted as an absolute selector");
         assert_eq!(again, canonical(&album));
 
@@ -601,7 +613,7 @@ mod windows {
         };
         assert!(prefix.is_verbatim(), "canonical output must be verbatim");
 
-        let error = resolve_album_directory_and_assert_unchanged(
+        let error = resolve_directory_selector_and_assert_unchanged(
             &sandbox,
             &resolved,
             Path::new("Lateralus"),

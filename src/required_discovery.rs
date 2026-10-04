@@ -4,17 +4,17 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! Discovers files for prepared album scopes.
+//! Discovers files for prepared collection scopes.
 //!
 //! Configured scopes and the optional shared default scope remain separate,
 //! even when their roots are equal or overlap.
 //!
 //! The read-only walk collects ordinary files without extension filtering,
-//! classification, probing, or album-membership decisions.
+//! classification, probing, or collection-membership decisions.
 
 use std::path::PathBuf;
 
-use crate::album_scope::{PreparedAlbumScopes, RedundancyWarning};
+use crate::collection_scope::{PreparedCollectionScopes, RedundancyWarning};
 use crate::discovery::{DiscoveryError, discover_source_files};
 
 /// Outcome of discovery across all required scopes.
@@ -49,7 +49,7 @@ pub(crate) struct RequiredCoverage {
 #[derive(Debug)]
 pub(crate) struct ConfiguredScopeCoverage {
     /// Prepared configured-directory scope, including its contributing selectors.
-    pub(crate) scope: crate::album_scope::ConfiguredDirectoryScope,
+    pub(crate) scope: crate::collection_scope::ConfiguredDirectoryScope,
     /// Files found under the resolved directory.
     pub(crate) files: Vec<PathBuf>,
 }
@@ -57,8 +57,8 @@ pub(crate) struct ConfiguredScopeCoverage {
 /// The shared default scope and files found under its resolved root.
 #[derive(Debug)]
 pub(crate) struct DefaultScopeCoverage {
-    /// Prepared scope and album declarations that require it.
-    pub(crate) scope: crate::album_scope::DefaultSourceRootScope,
+    /// Prepared default source-root scope, including the handles of declarations that require it.
+    pub(crate) scope: crate::collection_scope::DefaultSourceRootScope,
     /// Files found under the resolved traversal root.
     pub(crate) files: Vec<PathBuf>,
 }
@@ -76,7 +76,7 @@ pub(crate) struct RequiredFailures {
 #[derive(Debug)]
 pub(crate) struct ConfiguredScopeFailure {
     /// Affected configured-directory scope.
-    pub(crate) scope: crate::album_scope::ConfiguredDirectoryScope,
+    pub(crate) scope: crate::collection_scope::ConfiguredDirectoryScope,
     /// Original discovery error.
     pub(crate) error: DiscoveryError,
 }
@@ -84,8 +84,8 @@ pub(crate) struct ConfiguredScopeFailure {
 /// The shared default scope and its discovery error.
 #[derive(Debug)]
 pub(crate) struct DefaultScopeFailure {
-    /// Affected scope and album declarations that require it.
-    pub(crate) scope: crate::album_scope::DefaultSourceRootScope,
+    /// Affected default source-root scope, including the handles of declarations that require it.
+    pub(crate) scope: crate::collection_scope::DefaultSourceRootScope,
     /// Original discovery error.
     pub(crate) error: DiscoveryError,
 }
@@ -95,10 +95,10 @@ pub(crate) struct DefaultScopeFailure {
 /// All scopes are attempted. If any scan fails, all errors are returned and
 /// successful results are discarded. `warnings` accompany either outcome.
 pub(crate) fn discover_required_files(
-    scopes: PreparedAlbumScopes,
+    scopes: PreparedCollectionScopes,
     warnings: Vec<RedundancyWarning>,
 ) -> RequiredDiscovery {
-    let PreparedAlbumScopes {
+    let PreparedCollectionScopes {
         configured_directory_scopes,
         default_source_root_scope,
     } = scopes;
@@ -144,7 +144,7 @@ pub(crate) fn discover_required_files(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::album_scope::prepare_album_scopes;
+    use crate::collection_scope::prepare_collection_scopes;
     use crate::test_support::{
         SourceTreeSnapshot, TempSandbox, canonical, create_source, expect_prepared, parse_spec,
     };
@@ -176,7 +176,7 @@ mod tests {
         let missing_root = sandbox.path().join("missing-root");
         let spec = parse_spec("");
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &missing_root));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &missing_root));
         assert!(scopes.configured_directory_scopes.is_empty());
         assert!(scopes.default_source_root_scope.is_none());
 
@@ -198,17 +198,18 @@ mod tests {
             .expect("write non-audio file");
         fs::write(fear_of_a_blank_planet.join("no-extension"), b"raw")
             .expect("write extensionless file");
-        let spec =
-            parse_spec("[albums.fear-of-a-blank-planet]\ndirectory = \"Fear of a Blank Planet\"\n");
+        let spec = parse_spec(
+            "[collections.fear-of-a-blank-planet]\ndirectory = \"Fear of a Blank Planet\"\n",
+        );
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
         let (coverage, warnings) = expect_completed(discover_required_files(scopes, warnings));
 
         assert!(warnings.is_empty());
         assert_eq!(coverage.configured.len(), 1);
         assert!(coverage.default.is_none());
         let entry = &coverage.configured[0];
-        assert_eq!(entry.scope.album_handle, "fear-of-a-blank-planet");
+        assert_eq!(entry.scope.collection_handle, "fear-of-a-blank-planet");
         assert_eq!(
             entry.scope.resolved_directory,
             canonical(&fear_of_a_blank_planet)
@@ -237,23 +238,23 @@ mod tests {
     }
 
     #[test]
-    fn shared_default_scope_retains_several_dependent_albums() {
+    fn shared_default_scope_retains_several_dependent_collections() {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         fs::write(source.join("sentinel.txt"), b"sentinel").expect("write sentinel");
         let spec = parse_spec(
-            "[albums.z]\nname = \"Z\"\n\
-             [albums.a]\nname = \"A\"\n\
-             [albums.q]\nartist = \"Q\"\n",
+            "[collections.z]\nname = \"Z\"\n\
+             [collections.a]\nname = \"A\"\n\
+             [collections.q]\nartist = \"Q\"\n",
         );
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
         let (coverage, warnings) = expect_completed(discover_required_files(scopes, warnings));
 
         assert!(warnings.is_empty());
         assert!(coverage.configured.is_empty());
         let default = coverage.default.expect("default scope must stay covered");
-        assert_eq!(default.scope.dependent_album_handles, ["z", "a", "q"]);
+        assert_eq!(default.scope.dependent_collection_handles, ["z", "a", "q"]);
         assert_eq!(default.scope.resolved_traversal_root, canonical(&source));
         assert_eq!(
             default.files,
@@ -271,22 +272,22 @@ mod tests {
         let empty = source.join("empty-album");
         fs::create_dir(&empty).expect("create empty album");
         let spec = parse_spec(
-            "[albums.one]\ndirectory = \"Fear of a Blank Planet\"\n\
-             [albums.two]\ndirectory = \"empty-album\"\n\
-             [albums.three]\nname = \"Three\"\n",
+            "[collections.one]\ndirectory = \"Fear of a Blank Planet\"\n\
+             [collections.two]\ndirectory = \"empty-album\"\n\
+             [collections.three]\nname = \"Three\"\n",
         );
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
         let (coverage, warnings) = expect_completed(discover_required_files(scopes, warnings));
 
         assert!(warnings.is_empty());
         assert_eq!(coverage.configured.len(), 2);
-        assert_eq!(coverage.configured[0].scope.album_handle, "one");
+        assert_eq!(coverage.configured[0].scope.collection_handle, "one");
         assert_eq!(
             coverage.configured[0].files,
             vec![canonical(&fear_of_a_blank_planet).join("Anesthetize.flac")]
         );
-        assert_eq!(coverage.configured[1].scope.album_handle, "two");
+        assert_eq!(coverage.configured[1].scope.collection_handle, "two");
         assert_eq!(
             coverage.configured[1].scope.resolved_directory,
             canonical(&empty)
@@ -296,7 +297,7 @@ mod tests {
             "a successfully empty scope remains represented with no files"
         );
         let default = coverage.default.expect("default scope must stay covered");
-        assert_eq!(default.scope.dependent_album_handles, ["three"]);
+        assert_eq!(default.scope.dependent_collection_handles, ["three"]);
     }
 
     #[test]
@@ -309,12 +310,12 @@ mod tests {
             fs::write(dir.join("Anesthetize.dat"), b"track").expect("write track");
         }
         let spec = parse_spec(
-            "[albums.a]\ndirectory = \"a\"\n\
-             [albums.b]\ndirectory = \"b\"\n\
-             [albums.c]\ndirectory = \"c\"\n",
+            "[collections.a]\ndirectory = \"a\"\n\
+             [collections.b]\ndirectory = \"b\"\n\
+             [collections.c]\ndirectory = \"c\"\n",
         );
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
         let expected_a = canonical(&source.join("a"));
         let expected_c = canonical(&source.join("c"));
         fs::remove_dir_all(source.join("a")).expect("remove A");
@@ -325,9 +326,9 @@ mod tests {
         assert!(warnings.is_empty());
         assert!(failures.default.is_none());
         assert_eq!(failures.configured.len(), 2);
-        assert_eq!(failures.configured[0].scope.album_handle, "a");
+        assert_eq!(failures.configured[0].scope.collection_handle, "a");
         assert_eq!(failures.configured[0].scope.resolved_directory, expected_a);
-        assert_eq!(failures.configured[1].scope.album_handle, "c");
+        assert_eq!(failures.configured[1].scope.collection_handle, "c");
         assert_eq!(failures.configured[1].scope.resolved_directory, expected_c);
     }
 
@@ -339,11 +340,11 @@ mod tests {
         fs::create_dir(&deadwing).expect("create album directory");
         fs::write(deadwing.join("Lazarus.flac"), b"track").expect("write track");
         let spec = parse_spec(
-            "[albums.deadwing]\ndirectory = \"Deadwing\"\n\
-             [albums.in-absentia]\nname = \"In Absentia\"\n",
+            "[collections.deadwing]\ndirectory = \"Deadwing\"\n\
+             [collections.in-absentia]\nname = \"In Absentia\"\n",
         );
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
         let expected_configured = canonical(&deadwing);
         let expected_default = canonical(&source);
         fs::remove_dir_all(&source).expect("remove source root");
@@ -352,7 +353,7 @@ mod tests {
 
         assert!(warnings.is_empty());
         assert_eq!(failures.configured.len(), 1);
-        assert_eq!(failures.configured[0].scope.album_handle, "deadwing");
+        assert_eq!(failures.configured[0].scope.collection_handle, "deadwing");
         assert_eq!(
             failures.configured[0].scope.resolved_directory,
             expected_configured
@@ -360,7 +361,7 @@ mod tests {
         let default = failures
             .default
             .expect("default failure must stay separate");
-        assert_eq!(default.scope.dependent_album_handles, ["in-absentia"]);
+        assert_eq!(default.scope.dependent_collection_handles, ["in-absentia"]);
         assert_eq!(default.scope.resolved_traversal_root, expected_default);
     }
 
@@ -372,10 +373,10 @@ mod tests {
         fs::write(source.join("parent/top.dat"), b"top").expect("write parent file");
         fs::write(source.join("parent/child/nested.dat"), b"nested").expect("write child file");
         let spec = parse_spec(
-            "[albums.fear-of-a-blank-planet]\ndirectories = [\"parent\", \"parent/child\"]\n",
+            "[collections.fear-of-a-blank-planet]\ndirectories = [\"parent\", \"parent/child\"]\n",
         );
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
         assert_eq!(scopes.configured_directory_scopes.len(), 2);
         let expected_child = canonical(&source.join("parent/child"));
         fs::remove_dir_all(source.join("parent/child")).expect("remove child");
@@ -400,27 +401,27 @@ mod tests {
     }
 
     #[test]
-    fn equal_configured_roots_across_albums_remain_separate() {
+    fn equal_configured_roots_across_collections_remain_separate() {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let shared = source.join("shared");
         fs::create_dir(&shared).expect("create shared directory");
         fs::write(shared.join("Lazarus.flac"), b"track").expect("write track");
         let spec = parse_spec(
-            "[albums.fear-of-a-blank-planet]\ndirectory = \"shared\"\n\
-             [albums.deadwing]\ndirectory = \"shared\"\n",
+            "[collections.fear-of-a-blank-planet]\ndirectory = \"shared\"\n\
+             [collections.deadwing]\ndirectory = \"shared\"\n",
         );
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
         let (coverage, warnings) = expect_completed(discover_required_files(scopes, warnings));
 
         assert!(warnings.is_empty());
         assert_eq!(coverage.configured.len(), 2);
         assert_eq!(
-            coverage.configured[0].scope.album_handle,
+            coverage.configured[0].scope.collection_handle,
             "fear-of-a-blank-planet"
         );
-        assert_eq!(coverage.configured[1].scope.album_handle, "deadwing");
+        assert_eq!(coverage.configured[1].scope.collection_handle, "deadwing");
         for entry in &coverage.configured {
             assert_eq!(entry.scope.resolved_directory, canonical(&shared));
             assert_eq!(entry.files, vec![canonical(&shared).join("Lazarus.flac")]);
@@ -433,17 +434,17 @@ mod tests {
         let source = create_source(&sandbox);
         fs::write(source.join("Blackest Eyes.flac"), b"track").expect("write track");
         let spec = parse_spec(
-            "[albums.fear-of-a-blank-planet]\ndirectory = \".\"\n\
-             [albums.in-absentia]\nname = \"In Absentia\"\n",
+            "[collections.fear-of-a-blank-planet]\ndirectory = \".\"\n\
+             [collections.in-absentia]\nname = \"In Absentia\"\n",
         );
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
         let (coverage, warnings) = expect_completed(discover_required_files(scopes, warnings));
 
         assert!(warnings.is_empty());
         assert_eq!(coverage.configured.len(), 1);
         assert_eq!(
-            coverage.configured[0].scope.album_handle,
+            coverage.configured[0].scope.collection_handle,
             "fear-of-a-blank-planet"
         );
         assert_eq!(
@@ -451,7 +452,7 @@ mod tests {
             canonical(&source)
         );
         let default = coverage.default.expect("default scope must stay separate");
-        assert_eq!(default.scope.dependent_album_handles, ["in-absentia"]);
+        assert_eq!(default.scope.dependent_collection_handles, ["in-absentia"]);
         assert_eq!(default.scope.resolved_traversal_root, canonical(&source));
         assert_eq!(coverage.configured[0].files, default.files);
     }
@@ -464,16 +465,16 @@ mod tests {
         fs::create_dir(&stupid_dream).expect("create album directory");
         fs::write(stupid_dream.join("Even Less.flac"), b"track").expect("write track");
         let spec = parse_spec(
-            "[albums.stupid-dream]\ndirectories = [\"Stupid Dream\", \"Stupid Dream\"]\n",
+            "[collections.stupid-dream]\ndirectories = [\"Stupid Dream\", \"Stupid Dream\"]\n",
         );
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
         assert_eq!(warnings.len(), 1);
         let (coverage, warnings) = expect_completed(discover_required_files(scopes, warnings));
 
         assert_eq!(coverage.configured.len(), 1);
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].album_handle, "stupid-dream");
+        assert_eq!(warnings[0].collection_handle, "stupid-dream");
         assert_eq!(warnings[0].resolved_directory, canonical(&stupid_dream));
         assert_eq!(
             warnings[0].contributing_selectors,
@@ -489,11 +490,11 @@ mod tests {
         fs::create_dir(&fear_of_a_blank_planet).expect("create album directory");
         fs::write(fear_of_a_blank_planet.join("My Ashes.flac"), b"track").expect("write track");
         let spec = parse_spec(
-            "[albums.fear-of-a-blank-planet]\ndirectories = [\"Fear of a Blank Planet\", \"Fear of a Blank Planet\"]\n\
-             [albums.deadwing]\ndirectory = \"Fear of a Blank Planet\"\n",
+            "[collections.fear-of-a-blank-planet]\ndirectories = [\"Fear of a Blank Planet\", \"Fear of a Blank Planet\"]\n\
+             [collections.deadwing]\ndirectory = \"Fear of a Blank Planet\"\n",
         );
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
         assert_eq!(warnings.len(), 1);
         fs::remove_dir_all(&fear_of_a_blank_planet).expect("remove album");
 
@@ -501,7 +502,7 @@ mod tests {
 
         assert_eq!(failures.configured.len(), 2);
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].album_handle, "fear-of-a-blank-planet");
+        assert_eq!(warnings[0].collection_handle, "fear-of-a-blank-planet");
         assert_eq!(
             warnings[0].contributing_selectors.len(),
             2,
@@ -520,9 +521,9 @@ mod tests {
         fs::create_dir(&real).expect("create real directory");
         fs::write(real.join("Lazarus.flac"), b"track").expect("write track");
         symlink(&real, source.join("link")).expect("create selector symlink");
-        let spec = parse_spec("[albums.deadwing]\ndirectory = \"link\"\n");
+        let spec = parse_spec("[collections.deadwing]\ndirectory = \"link\"\n");
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
         assert_eq!(scopes.configured_directory_scopes.len(), 1);
         assert_eq!(
             scopes.configured_directory_scopes[0].resolved_directory,
@@ -558,12 +559,12 @@ mod tests {
         fs::write(deadwing.join("Lazarus.flac"), b"other bytes").expect("write track");
         fs::write(source.join("sentinel.txt"), b"sentinel").expect("write sentinel");
         let spec = parse_spec(
-            "[albums.fear-of-a-blank-planet]\ndirectory = \"Fear of a Blank Planet\"\n\
-             [albums.deadwing]\ndirectory = \"Deadwing\"\n\
-             [albums.dependent]\nname = \"Dependent\"\n",
+            "[collections.fear-of-a-blank-planet]\ndirectory = \"Fear of a Blank Planet\"\n\
+             [collections.deadwing]\ndirectory = \"Deadwing\"\n\
+             [collections.dependent]\nname = \"Dependent\"\n",
         );
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
         let snapshot = SourceTreeSnapshot::capture(&source);
         let outcome = discover_required_files(scopes, warnings);
         snapshot.assert_unchanged();

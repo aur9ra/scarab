@@ -26,7 +26,7 @@ const FFPROBE: &str = "ffprobe";
 /// canonicalized, absolutized, or otherwise rewritten. Success means ffprobe
 /// exited successfully and returned the requested JSON format metadata.
 ///
-/// It does not classify the path, establish album membership, identify or finalize
+/// It does not classify the path, establish collection membership, identify or finalize
 /// a logical track, or determine output inclusion. No prior classification is
 /// required.
 pub fn probe_source_file(path: &Path) -> Result<ProbedSourceFile, ProbeError> {

@@ -7,9 +7,9 @@
 //! Directory-only membership for configured collections from a completed
 //! observed source file inventory.
 //!
-//! An album declaration defines a user-configured collection. An observed
-//! source file is a member when it is classified as source audio and one of
-//! the collection's configured directory scopes reports it.
+//! A collection declaration supplies membership criteria. For a directory-only
+//! declaration, an observed source file is a member when it is classified as
+//! source audio and one of the declaration's configured directory scopes reports it.
 //!
 //! An observed source file appears at most once in each collection but may
 //! belong to several collections. Membership copies its retained observed
@@ -25,7 +25,7 @@
 
 use std::path::PathBuf;
 
-use crate::config::{Album, LibraryBuildSpec};
+use crate::config::{CollectionDeclaration, LibraryBuildSpec};
 use crate::observed_source_file_inventory::{
     ObservedSourceFile, ObservedSourceFileInventory, RequiredScope,
 };
@@ -35,13 +35,13 @@ use crate::source_audio::classify_source_audio;
 #[derive(Debug)]
 pub(crate) struct CollectionMembership {
     collections: Vec<CollectionMembers>,
-    unevaluated_album_handles: Vec<String>,
+    unevaluated_collection_handles: Vec<String>,
 }
 
 /// Established directory-only membership for one evaluated collection.
 #[derive(Debug)]
 pub(crate) struct CollectionMembers {
-    album_handle: String,
+    collection_handle: String,
     members: Vec<PathBuf>,
 }
 
@@ -55,15 +55,15 @@ impl CollectionMembership {
     ///
     /// These declarations have no established membership, unlike an evaluated
     /// collection with no members.
-    pub(crate) fn unevaluated_album_handles(&self) -> &[String] {
-        &self.unevaluated_album_handles
+    pub(crate) fn unevaluated_collection_handles(&self) -> &[String] {
+        &self.unevaluated_collection_handles
     }
 }
 
 impl CollectionMembers {
     /// The configuration handle of this collection.
-    pub(crate) fn album_handle(&self) -> &str {
-        &self.album_handle
+    pub(crate) fn collection_handle(&self) -> &str {
+        &self.collection_handle
     }
 
     /// Pathnames of the collection's members, in no specified order.
@@ -74,7 +74,7 @@ impl CollectionMembers {
 
 /// Builds directory-only membership for `spec` using a completed `inventory`.
 ///
-/// Declarations with a supplied `name` or `artist` selector are reported as
+/// Declarations with a supplied `name` or `artist` metadata selector are reported as
 /// unevaluated without checking their directory associations. Other declarations
 /// are evaluated even when none of the files reported by their configured
 /// directory scopes are recognized as source audio.
@@ -90,49 +90,54 @@ pub(crate) fn directory_only_membership(
     inventory: &ObservedSourceFileInventory,
 ) -> CollectionMembership {
     let mut collections = Vec::new();
-    let mut unevaluated_album_handles = Vec::new();
+    let mut unevaluated_collection_handles = Vec::new();
 
-    for (album_handle, album) in spec.albums() {
-        if !directory_only_eligible(album) {
-            unevaluated_album_handles.push(album_handle.to_owned());
+    for (collection_handle, declaration) in spec.collection_declarations() {
+        if !directory_only_eligible(declaration) {
+            unevaluated_collection_handles.push(collection_handle.to_owned());
             continue;
         }
 
         let members: Vec<PathBuf> = inventory
             .files()
             .filter(|observed_file| classify_source_audio(observed_file.path()).is_some())
-            .filter(|observed_file| file_reported_by_configured_scope(observed_file, album_handle))
+            .filter(|observed_file| {
+                file_reported_by_configured_scope(observed_file, collection_handle)
+            })
             .map(|observed_file| observed_file.path().to_path_buf())
             .collect();
 
         collections.push(CollectionMembers {
-            album_handle: album_handle.to_owned(),
+            collection_handle: collection_handle.to_owned(),
             members,
         });
     }
 
     CollectionMembership {
         collections,
-        unevaluated_album_handles,
+        unevaluated_collection_handles,
     }
 }
 
-/// Whether directory-only membership may evaluate `album`.
-fn directory_only_eligible(album: &Album) -> bool {
-    album.name.is_none() && album.artist.is_none()
+/// Whether directory-only membership may evaluate `declaration`.
+fn directory_only_eligible(declaration: &CollectionDeclaration) -> bool {
+    declaration.name.is_none() && declaration.artist.is_none()
 }
 
-/// Whether a configured directory scope for `album_handle` reported `file`.
+/// Whether a configured directory scope for `collection_handle` reported `file`.
 ///
 /// Reporting by the default source-root scope does not satisfy this check.
 /// A matching configured scope alone does not establish membership, which also
 /// requires source-audio recognition.
-fn file_reported_by_configured_scope(file: &ObservedSourceFile<'_>, album_handle: &str) -> bool {
+fn file_reported_by_configured_scope(
+    file: &ObservedSourceFile<'_>,
+    collection_handle: &str,
+) -> bool {
     file.reporting_scopes().any(|scope| match scope {
         RequiredScope::ConfiguredDirectory {
-            album_handle: scope_album_handle,
+            collection_handle: scope_collection_handle,
             ..
-        } => scope_album_handle == album_handle,
+        } => scope_collection_handle == collection_handle,
         RequiredScope::DefaultSourceRoot { .. } => false,
     })
 }
@@ -154,15 +159,15 @@ mod tests {
         directory_only_membership(spec, success.inventory())
     }
 
-    /// Returns the sorted members of `album_handle`, which must be evaluated.
+    /// Returns the sorted members of `collection_handle`, which must be evaluated.
     ///
     /// Sorting keeps assertions independent of unspecified member order.
-    fn sorted_members(membership: &CollectionMembership, album_handle: &str) -> Vec<PathBuf> {
+    fn sorted_members(membership: &CollectionMembership, collection_handle: &str) -> Vec<PathBuf> {
         let collection = membership
             .collections()
             .iter()
-            .find(|collection| collection.album_handle() == album_handle)
-            .unwrap_or_else(|| panic!("collection {album_handle} must be evaluated"));
+            .find(|collection| collection.collection_handle() == collection_handle)
+            .unwrap_or_else(|| panic!("collection {collection_handle} must be evaluated"));
         let mut members = collection.members().to_vec();
         members.sort();
         members
@@ -177,8 +182,9 @@ mod tests {
         // the contents are not valid media, but directory-only membership does not probe them
         fs::write(album.join("01 - Anesthetize.flac"), b"not a media file").expect("write track");
         fs::write(album.join("bonus/02 - My Ashes.FLAC"), b"").expect("write empty track");
-        let spec =
-            parse_spec("[albums.fear-of-a-blank-planet]\ndirectory = \"Fear of a Blank Planet\"\n");
+        let spec = parse_spec(
+            "[collections.fear-of-a-blank-planet]\ndirectory = \"Fear of a Blank Planet\"\n",
+        );
 
         let snapshot = SourceTreeSnapshot::capture(&source);
         let result = build_observed_source_file_inventory(&spec, &source);
@@ -187,7 +193,7 @@ mod tests {
 
         let membership = directory_only_membership(&spec, success.inventory());
 
-        assert!(membership.unevaluated_album_handles().is_empty());
+        assert!(membership.unevaluated_collection_handles().is_empty());
         let mut expected = vec![
             canonical(&album).join("01 - Anesthetize.flac"),
             canonical(&album).join("bonus/02 - My Ashes.FLAC"),
@@ -215,7 +221,7 @@ mod tests {
         ] {
             fs::write(album.join(name), b"other").expect("write non-audio file");
         }
-        let spec = parse_spec("[albums.tool]\ndirectory = \"Album\"\n");
+        let spec = parse_spec("[collections.tool]\ndirectory = \"Album\"\n");
 
         let membership = membership_for(&spec, &source);
 
@@ -239,7 +245,7 @@ mod tests {
         fs::write(two.join("03.flac"), b"two").expect("write second track");
         // the nested file is reported by both the parent and nested scopes
         let spec = parse_spec(
-            "[albums.collection]\ndirectories = [\"disc one\", \"disc two\", \"disc one/nested\"]\n",
+            "[collections.collection]\ndirectories = [\"disc one\", \"disc two\", \"disc one/nested\"]\n",
         );
 
         let membership = membership_for(&spec, &source);
@@ -265,16 +271,16 @@ mod tests {
         fs::write(alpha_only.join("alpha.flac"), b"alpha").expect("write alpha track");
 
         for declarations in [
-            "[albums.alpha]\ndirectories = [\"shared\", \"alpha-only\"]\n\
-             [albums.beta]\ndirectory = \"shared\"\n",
-            "[albums.beta]\ndirectory = \"shared\"\n\
-             [albums.alpha]\ndirectories = [\"shared\", \"alpha-only\"]\n",
+            "[collections.alpha]\ndirectories = [\"shared\", \"alpha-only\"]\n\
+             [collections.beta]\ndirectory = \"shared\"\n",
+            "[collections.beta]\ndirectory = \"shared\"\n\
+             [collections.alpha]\ndirectories = [\"shared\", \"alpha-only\"]\n",
         ] {
             let spec = parse_spec(declarations);
             let membership = membership_for(&spec, &source);
 
             assert!(
-                membership.unevaluated_album_handles().is_empty(),
+                membership.unevaluated_collection_handles().is_empty(),
                 "declarations: {declarations}"
             );
             let mut alpha_members = vec![
@@ -305,13 +311,13 @@ mod tests {
         fs::create_dir(&non_audio).expect("create non-audio directory");
         fs::write(non_audio.join("notes.txt"), b"notes").expect("write notes");
         let spec = parse_spec(
-            "[albums.empty]\ndirectory = \"empty\"\n\
-             [albums.non-audio]\ndirectory = \"non-audio\"\n",
+            "[collections.empty]\ndirectory = \"empty\"\n\
+             [collections.non-audio]\ndirectory = \"non-audio\"\n",
         );
 
         let membership = membership_for(&spec, &source);
 
-        assert!(membership.unevaluated_album_handles().is_empty());
+        assert!(membership.unevaluated_collection_handles().is_empty());
         assert_eq!(membership.collections().len(), 2);
         assert_eq!(sorted_members(&membership, "empty"), Vec::<PathBuf>::new());
         assert_eq!(
@@ -336,11 +342,11 @@ mod tests {
             fs::write(directory.join("track.flac"), b"audio").expect("write track");
         }
         let spec = parse_spec(
-            "[albums.pure]\ndirectory = \"pure\"\n\
-             [albums.with-name]\nname = \"Named\"\ndirectory = \"with-name\"\n\
-             [albums.with-artist]\nartist = \"Artist\"\ndirectory = \"with-artist\"\n\
-             [albums.empty-name]\nname = \"\"\ndirectory = \"empty-name\"\n\
-             [albums.empty-artist]\nartist = \"\"\ndirectory = \"empty-artist\"\n",
+            "[collections.pure]\ndirectory = \"pure\"\n\
+             [collections.with-name]\nname = \"Named\"\ndirectory = \"with-name\"\n\
+             [collections.with-artist]\nartist = \"Artist\"\ndirectory = \"with-artist\"\n\
+             [collections.empty-name]\nname = \"\"\ndirectory = \"empty-name\"\n\
+             [collections.empty-artist]\nartist = \"\"\ndirectory = \"empty-artist\"\n",
         );
 
         let membership = membership_for(&spec, &source);
@@ -349,9 +355,12 @@ mod tests {
             ["with-name", "with-artist", "empty-name", "empty-artist"]
                 .map(str::to_owned)
                 .to_vec();
-        assert_eq!(membership.unevaluated_album_handles(), expected_unevaluated);
+        assert_eq!(
+            membership.unevaluated_collection_handles(),
+            expected_unevaluated
+        );
         assert_eq!(membership.collections().len(), 1);
-        assert_eq!(membership.collections()[0].album_handle(), "pure");
+        assert_eq!(membership.collections()[0].collection_handle(), "pure");
 
         // these files are reported only by other declarations' configured directory
         // scopes, so they are not members of `pure`
@@ -381,9 +390,9 @@ mod tests {
             .expect("write configured track");
         fs::write(source.join("root-only.flac"), b"root").expect("write default-root track");
         let spec = parse_spec(
-            "[albums.configured]\ndirectory = \"collection\"\n\
-             [albums.default-name]\nname = \"Named\"\n\
-             [albums.default-artist]\nartist = \"\"\n",
+            "[collections.configured]\ndirectory = \"collection\"\n\
+             [collections.default-name]\nname = \"Named\"\n\
+             [collections.default-artist]\nartist = \"\"\n",
         );
 
         let membership = membership_for(&spec, &source);
@@ -391,9 +400,15 @@ mod tests {
         let expected_unevaluated: Vec<String> = ["default-name", "default-artist"]
             .map(str::to_owned)
             .to_vec();
-        assert_eq!(membership.unevaluated_album_handles(), expected_unevaluated);
+        assert_eq!(
+            membership.unevaluated_collection_handles(),
+            expected_unevaluated
+        );
         assert_eq!(membership.collections().len(), 1);
-        assert_eq!(membership.collections()[0].album_handle(), "configured");
+        assert_eq!(
+            membership.collections()[0].collection_handle(),
+            "configured"
+        );
         // The shared default-root scope does not contribute to any evaluated
         // collection. Only the configured directory scope contributes.
         assert_eq!(
@@ -412,7 +427,7 @@ mod tests {
         fs::write(album.join("disc 1/01 - Song (Live).flac"), b"one").expect("write disc 1 track");
         fs::write(album.join("disc 2/01 - Song (Live).flac"), b"two").expect("write disc 2 track");
         fs::write(album.join("Björk - Homogenic.flac"), b"unicode").expect("write unicode track");
-        let spec = parse_spec("[albums.tool]\ndirectory = \"Album\"\n");
+        let spec = parse_spec("[collections.tool]\ndirectory = \"Album\"\n");
 
         let membership = membership_for(&spec, &source);
 
@@ -434,8 +449,8 @@ mod tests {
         fs::write(album.join("track.flac"), b"track").expect("write track");
         fs::write(album.join("notes.txt"), b"notes").expect("write notes");
         let spec = parse_spec(
-            "[albums.audio]\ndirectory = \"Album\"\n\
-             [albums.with-name]\nname = \"Named\"\ndirectory = \"Album\"\n",
+            "[collections.audio]\ndirectory = \"Album\"\n\
+             [collections.with-name]\nname = \"Named\"\ndirectory = \"Album\"\n",
         );
 
         let snapshot = SourceTreeSnapshot::capture(&source);

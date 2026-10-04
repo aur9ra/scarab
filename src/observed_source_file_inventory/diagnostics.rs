@@ -17,12 +17,12 @@ use super::{
     required_scope_from_default_source_root,
 };
 
-/// Configured directory selectors in one album declaration that resolve to
+/// Configured directory selectors in one collection declaration that resolve to
 /// the same directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RedundantConfiguredSelectors {
-    /// Album with redundant selectors.
-    pub album_handle: String,
+    /// Handle of the collection declaration containing redundant selectors.
+    pub collection_handle: String,
     /// Shared resolved path.
     pub resolved_directory: PathBuf,
     /// Selector spellings in declaration order, including duplicates.
@@ -98,8 +98,8 @@ impl std::error::Error for ObservedSourceFileInventoryFailure {
 /// A configured directory selector that failed to resolve.
 #[derive(Debug)]
 pub struct ConfiguredSelectorFailure {
-    /// Album that owns the failed selector.
-    pub album_handle: String,
+    /// Handle of the collection declaration containing the failed selector.
+    pub collection_handle: String,
     /// Directory-selector spelling from the configuration.
     pub configured_selector: PathBuf,
     /// Error returned by the resolver.
@@ -111,9 +111,9 @@ pub struct ConfiguredSelectorFailure {
 pub struct DefaultSourceRootFailure {
     /// Source-root spelling supplied by the caller.
     pub original_source_root: PathBuf,
-    /// Album declarations without directory selectors requiring this scope, in
+    /// Handles of collection declarations without directory selectors that require this scope, in
     /// declaration order.
-    pub dependent_album_handles: Vec<String>,
+    pub dependent_collection_handles: Vec<String>,
     /// Reason preparation failed.
     pub kind: DefaultSourceRootFailureKind,
 }
@@ -155,12 +155,12 @@ pub struct RequiredScopeDiscoveryFailure {
 }
 
 pub(super) fn warnings_from_private(
-    warnings: Vec<crate::album_scope::RedundancyWarning>,
+    warnings: Vec<crate::collection_scope::RedundancyWarning>,
 ) -> Vec<RedundantConfiguredSelectors> {
     let mut converted = Vec::with_capacity(warnings.len());
     for warning in warnings {
         converted.push(RedundantConfiguredSelectors {
-            album_handle: warning.album_handle,
+            collection_handle: warning.collection_handle,
             resolved_directory: warning.resolved_directory,
             contributing_selectors: warning.contributing_selectors,
         });
@@ -169,42 +169,42 @@ pub(super) fn warnings_from_private(
 }
 
 pub(super) fn configured_failure_from_private(
-    failure: crate::album_scope::ConfiguredSelectorFailure,
+    failure: crate::collection_scope::ConfiguredSelectorFailure,
 ) -> ConfiguredSelectorFailure {
     ConfiguredSelectorFailure {
-        album_handle: failure.album_handle,
+        collection_handle: failure.collection_handle,
         configured_selector: failure.configured_selector,
         error: failure.error,
     }
 }
 
 pub(super) fn default_failure_from_private(
-    failure: crate::album_scope::DefaultSourceRootFailure,
+    failure: crate::collection_scope::DefaultSourceRootFailure,
 ) -> DefaultSourceRootFailure {
     let kind = match failure.kind {
-        crate::album_scope::DefaultSourceRootFailureKind::EmptyInput => {
+        crate::collection_scope::DefaultSourceRootFailureKind::EmptyInput => {
             DefaultSourceRootFailureKind::EmptyInput
         }
-        crate::album_scope::DefaultSourceRootFailureKind::UnsupportedPathForm => {
+        crate::collection_scope::DefaultSourceRootFailureKind::UnsupportedPathForm => {
             DefaultSourceRootFailureKind::UnsupportedPathForm
         }
-        crate::album_scope::DefaultSourceRootFailureKind::ResolutionFailed { error } => {
+        crate::collection_scope::DefaultSourceRootFailureKind::ResolutionFailed { error } => {
             DefaultSourceRootFailureKind::ResolutionFailed { error }
         }
-        crate::album_scope::DefaultSourceRootFailureKind::ResolvedPathInspectionFailed {
+        crate::collection_scope::DefaultSourceRootFailureKind::ResolvedPathInspectionFailed {
             resolved_path,
             error,
         } => DefaultSourceRootFailureKind::ResolvedPathInspectionFailed {
             resolved_path,
             error,
         },
-        crate::album_scope::DefaultSourceRootFailureKind::ResolvedTargetNotDirectory {
+        crate::collection_scope::DefaultSourceRootFailureKind::ResolvedTargetNotDirectory {
             resolved_path,
         } => DefaultSourceRootFailureKind::ResolvedTargetNotDirectory { resolved_path },
     };
     DefaultSourceRootFailure {
         original_source_root: failure.original_source_root,
-        dependent_album_handles: failure.dependent_album_handles,
+        dependent_collection_handles: failure.dependent_collection_handles,
         kind,
     }
 }
@@ -236,8 +236,8 @@ mod tests {
 
     #[test]
     fn discovery_failure_translation_retains_scope_and_error() {
-        let scope = crate::album_scope::ConfiguredDirectoryScope {
-            album_handle: "deadwing".to_owned(),
+        let scope = crate::collection_scope::ConfiguredDirectoryScope {
+            collection_handle: "deadwing".to_owned(),
             resolved_directory: PathBuf::from("/music/Deadwing"),
             contributing_selectors: vec![PathBuf::from("Deadwing")],
         };
@@ -247,10 +247,10 @@ mod tests {
         let failures = crate::required_discovery::RequiredFailures {
             configured: vec![crate::required_discovery::ConfiguredScopeFailure { scope, error }],
             default: Some(crate::required_discovery::DefaultScopeFailure {
-                scope: crate::album_scope::DefaultSourceRootScope {
+                scope: crate::collection_scope::DefaultSourceRootScope {
                     original_source_root: PathBuf::from("source"),
                     resolved_traversal_root: PathBuf::from("/music/source"),
-                    dependent_album_handles: vec!["in-absentia".to_owned()],
+                    dependent_collection_handles: vec!["in-absentia".to_owned()],
                 },
                 error: DiscoveryError::Root {
                     path: PathBuf::from("/music/source"),
@@ -264,11 +264,11 @@ mod tests {
         assert_eq!(converted.len(), 2, "both scope failures stay separate");
         match &converted[0].scope {
             RequiredScope::ConfiguredDirectory {
-                album_handle,
+                collection_handle,
                 resolved_directory,
                 contributing_selectors,
             } => {
-                assert_eq!(album_handle, "deadwing");
+                assert_eq!(collection_handle, "deadwing");
                 assert_eq!(
                     resolved_directory.as_os_str(),
                     OsStr::new("/music/Deadwing")
@@ -291,14 +291,14 @@ mod tests {
             RequiredScope::DefaultSourceRoot {
                 original_source_root,
                 resolved_traversal_root,
-                dependent_album_handles,
+                dependent_collection_handles,
             } => {
                 assert_eq!(original_source_root.as_os_str(), OsStr::new("source"));
                 assert_eq!(
                     resolved_traversal_root.as_os_str(),
                     OsStr::new("/music/source")
                 );
-                assert_eq!(dependent_album_handles, &["in-absentia".to_owned()]);
+                assert_eq!(dependent_collection_handles, &["in-absentia".to_owned()]);
             }
             other => panic!("second failure must keep default scope, got {other:?}"),
         }
@@ -320,23 +320,24 @@ mod tests {
         let original_root = PathBuf::from("source");
         let dependents = vec!["tool".to_owned()];
 
-        let empty = default_failure_from_private(crate::album_scope::DefaultSourceRootFailure {
-            original_source_root: original_root.clone(),
-            dependent_album_handles: dependents.clone(),
-            kind: crate::album_scope::DefaultSourceRootFailureKind::EmptyInput,
-        });
+        let empty =
+            default_failure_from_private(crate::collection_scope::DefaultSourceRootFailure {
+                original_source_root: original_root.clone(),
+                dependent_collection_handles: dependents.clone(),
+                kind: crate::collection_scope::DefaultSourceRootFailureKind::EmptyInput,
+            });
         assert!(matches!(
             empty.kind,
             DefaultSourceRootFailureKind::EmptyInput
         ));
         assert_eq!(empty.original_source_root, original_root);
-        assert_eq!(empty.dependent_album_handles, dependents);
+        assert_eq!(empty.dependent_collection_handles, dependents);
 
         let unsupported =
-            default_failure_from_private(crate::album_scope::DefaultSourceRootFailure {
+            default_failure_from_private(crate::collection_scope::DefaultSourceRootFailure {
                 original_source_root: original_root.clone(),
-                dependent_album_handles: dependents.clone(),
-                kind: crate::album_scope::DefaultSourceRootFailureKind::UnsupportedPathForm,
+                dependent_collection_handles: dependents.clone(),
+                kind: crate::collection_scope::DefaultSourceRootFailureKind::UnsupportedPathForm,
             });
         assert!(matches!(
             unsupported.kind,
@@ -345,11 +346,11 @@ mod tests {
 
         let resolved = PathBuf::from("/music/resolved");
         let inspection =
-            default_failure_from_private(crate::album_scope::DefaultSourceRootFailure {
+            default_failure_from_private(crate::collection_scope::DefaultSourceRootFailure {
                 original_source_root: original_root.clone(),
-                dependent_album_handles: dependents.clone(),
+                dependent_collection_handles: dependents.clone(),
                 kind:
-                    crate::album_scope::DefaultSourceRootFailureKind::ResolvedPathInspectionFailed {
+                    crate::collection_scope::DefaultSourceRootFailureKind::ResolvedPathInspectionFailed {
                         resolved_path: resolved.clone(),
                         error: io::Error::new(io::ErrorKind::PermissionDenied, "denied"),
                     },
@@ -365,10 +366,10 @@ mod tests {
             other => panic!("inspection failure must stay typed, got {other:?}"),
         }
 
-        let not_dir = default_failure_from_private(crate::album_scope::DefaultSourceRootFailure {
+        let not_dir = default_failure_from_private(crate::collection_scope::DefaultSourceRootFailure {
             original_source_root: original_root.clone(),
-            dependent_album_handles: dependents.clone(),
-            kind: crate::album_scope::DefaultSourceRootFailureKind::ResolvedTargetNotDirectory {
+            dependent_collection_handles: dependents.clone(),
+            kind: crate::collection_scope::DefaultSourceRootFailureKind::ResolvedTargetNotDirectory {
                 resolved_path: resolved.clone(),
             },
         });
@@ -380,10 +381,10 @@ mod tests {
         }
 
         let resolution =
-            default_failure_from_private(crate::album_scope::DefaultSourceRootFailure {
+            default_failure_from_private(crate::collection_scope::DefaultSourceRootFailure {
                 original_source_root: original_root.clone(),
-                dependent_album_handles: dependents.clone(),
-                kind: crate::album_scope::DefaultSourceRootFailureKind::ResolutionFailed {
+                dependent_collection_handles: dependents.clone(),
+                kind: crate::collection_scope::DefaultSourceRootFailureKind::ResolutionFailed {
                     error: io::Error::new(io::ErrorKind::NotFound, "missing"),
                 },
             });
@@ -396,10 +397,10 @@ mod tests {
     }
 
     #[test]
-    fn warnings_from_private_preserve_album_root_and_selector_order() {
+    fn warnings_from_private_preserve_collection_root_and_selector_order() {
         let private = vec![
-            crate::album_scope::RedundancyWarning {
-                album_handle: "one".to_owned(),
+            crate::collection_scope::RedundancyWarning {
+                collection_handle: "one".to_owned(),
                 resolved_directory: PathBuf::from("/music/one"),
                 contributing_selectors: vec![
                     PathBuf::from("one"),
@@ -407,8 +408,8 @@ mod tests {
                     PathBuf::from("one"),
                 ],
             },
-            crate::album_scope::RedundancyWarning {
-                album_handle: "three".to_owned(),
+            crate::collection_scope::RedundancyWarning {
+                collection_handle: "three".to_owned(),
                 resolved_directory: PathBuf::from("/music/two"),
                 contributing_selectors: vec![PathBuf::from("two"), PathBuf::from("two")],
             },
@@ -417,7 +418,7 @@ mod tests {
         let converted = warnings_from_private(private);
 
         assert_eq!(converted.len(), 2);
-        assert_eq!(converted[0].album_handle, "one");
+        assert_eq!(converted[0].collection_handle, "one");
         assert_eq!(
             converted[0].resolved_directory.as_os_str(),
             OsStr::new("/music/one")
@@ -435,7 +436,7 @@ mod tests {
             converted[0].contributing_selectors[2].as_os_str(),
             OsStr::new("one")
         );
-        assert_eq!(converted[1].album_handle, "three");
+        assert_eq!(converted[1].collection_handle, "three");
         assert_eq!(
             converted[1].resolved_directory.as_os_str(),
             OsStr::new("/music/two")
@@ -447,13 +448,13 @@ mod tests {
     fn failure_display_and_error_source_are_stable() {
         let preparation = ObservedSourceFileInventoryFailure::Preparation {
             configured_failures: vec![ConfiguredSelectorFailure {
-                album_handle: "tool".to_owned(),
+                collection_handle: "tool".to_owned(),
                 configured_selector: PathBuf::from("missing"),
                 error: io::Error::new(io::ErrorKind::NotFound, "missing"),
             }],
             default_source_root_failure: Some(DefaultSourceRootFailure {
                 original_source_root: PathBuf::from("source"),
-                dependent_album_handles: vec!["dependent".to_owned()],
+                dependent_collection_handles: vec!["dependent".to_owned()],
                 kind: DefaultSourceRootFailureKind::EmptyInput,
             }),
             warnings: Vec::new(),
@@ -481,7 +482,7 @@ mod tests {
                 scope: RequiredScope::DefaultSourceRoot {
                     original_source_root: PathBuf::from("source"),
                     resolved_traversal_root: PathBuf::from("/music/source"),
-                    dependent_album_handles: vec!["dependent".to_owned()],
+                    dependent_collection_handles: vec!["dependent".to_owned()],
                 },
                 error: DiscoveryError::NotADirectory {
                     path: PathBuf::from("/music/source"),

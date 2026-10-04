@@ -6,14 +6,12 @@
 
 //! Discovery of ordinary (non-linked) source files under one root directory.
 //!
-//! [`discover_source_files`] recursively walks one supplied source root and
-//! returns every file it contains. The walk is configuration-,
-//! album-, metadata-, and probe-blind. It looks only at filesystem names and
-//! entry types, never at file extensions or contents.
+//! [`discover_source_files`] recursively walks one supplied source root and returns every file it
+//! contains. The walk inspects only filesystem names and entry types. It does not inspect
+//! configuration, file extensions, file contents, or music metadata, invoke probes, or decide
+//! collection membership.
 //!
-//! Discovery does not resolve or validate album filesystem declarations.
-//! Album membership assignment is not a responsibility or within the
-//! scope of this walk.
+//! Discovery does not resolve or validate configured directory selectors.
 //!
 //! Symlink handling is asymmetric:
 //! - A terminal symlink in the supplied root's own pathname is rejected.
@@ -43,7 +41,7 @@ use std::path::{Path, PathBuf};
 /// separators or `.` components. Symlinks in intermediate (non-terminal) components
 /// of the supplied root pathname are not independently rejected and may be resolved
 /// by ordinary filesystem path resolution. Descendant symlink entries are
-/// skipped. Discovery performs no album filesystem-selector resolution or validation.
+/// skipped. Discovery does not resolve or validate configured directory selectors.
 /// Root violations are reported as [`DiscoveryError`].
 pub fn discover_source_files(root: &Path) -> Result<Vec<PathBuf>, DiscoveryError> {
     // Validate root directory.

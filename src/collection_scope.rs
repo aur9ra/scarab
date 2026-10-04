@@ -4,11 +4,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! Builds filesystem scopes from directory selectors in a validated library build spec.
+//! Prepares filesystem scopes on behalf of collection declarations.
 //!
 //! Relative directory selectors use the supplied source root. Absolute
 //! selectors ignore it. Selectors are grouped by resolved path within each
-//! album declaration. Multiple selectors for one path produce one warning per
+//! collection declaration. Multiple selectors for one path produce one warning per
 //! group. Declarations without directory selectors (such as those with
 //! metadata selectors) share one prepared source-root scope.
 //!
@@ -19,28 +19,28 @@
 //! and any warnings from successful groups.
 //!
 //! This module only inspects paths. It does not modify the source tree, find
-//! files, or assign album membership to discovered files.
+//! files, or decide collection membership.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::album_directory::resolve_album_directory;
 use crate::config::LibraryBuildSpec;
+use crate::directory_selector::resolve_directory_selector;
 
-/// Result of preparing album filesystem scopes.
+/// Result of preparing filesystem scopes for collection declarations.
 #[derive(Debug)]
-pub(crate) enum AlbumScopePreparation {
+pub(crate) enum CollectionScopePreparation {
     /// Every required scope was prepared.
     Prepared {
         /// The prepared scopes.
-        scopes: PreparedAlbumScopes,
+        scopes: PreparedCollectionScopes,
         /// Redundancy warnings from successful configured groups.
         warnings: Vec<RedundancyWarning>,
     },
-    /// >=1 required scope failed to prepare.
+    /// One or more required scopes failed to prepare.
     Failed {
-        /// Selector failures in album and selector order; duplicates stay separate.
+        /// Selector failures in declaration and selector order; duplicates stay separate.
         configured_failures: Vec<ConfiguredSelectorFailure>,
         /// Failure to prepare the shared default root, if needed.
         default_source_root_failure: Option<DefaultSourceRootFailure>,
@@ -49,21 +49,21 @@ pub(crate) enum AlbumScopePreparation {
     },
 }
 
-/// Scopes from a successful preparation.
+/// Scopes from a successful collection-scope preparation.
 #[derive(Debug)]
-pub(crate) struct PreparedAlbumScopes {
-    /// Configured scopes in album and first-selector order.
+pub(crate) struct PreparedCollectionScopes {
+    /// Configured scopes in declaration and first-selector order.
     pub(crate) configured_directory_scopes: Vec<ConfiguredDirectoryScope>,
     /// Shared by declarations without configured directory selectors, if any.
     pub(crate) default_source_root_scope: Option<DefaultSourceRootScope>,
 }
 
-/// One group of directory selectors in an album declaration that resolved to
+/// One group of directory selectors in a collection declaration that resolved to
 /// the same path.
 #[derive(Debug)]
 pub(crate) struct ConfiguredDirectoryScope {
-    /// Album declaration for which this scope is required.
-    pub(crate) album_handle: String,
+    /// Handle of the collection declaration that requires this scope.
+    pub(crate) collection_handle: String,
     /// Resolved path shared by this group.
     pub(crate) resolved_directory: PathBuf,
     /// Selector spellings in declaration order, including duplicates.
@@ -73,8 +73,8 @@ pub(crate) struct ConfiguredDirectoryScope {
 /// One configured directory-selector occurrence that failed to resolve.
 #[derive(Debug)]
 pub(crate) struct ConfiguredSelectorFailure {
-    /// Album declaration containing the failed selector.
-    pub(crate) album_handle: String,
+    /// Handle of the collection declaration containing the failed selector.
+    pub(crate) collection_handle: String,
     /// Directory-selector spelling from the configuration.
     pub(crate) configured_selector: PathBuf,
     /// Error returned by the resolver.
@@ -88,9 +88,9 @@ pub(crate) struct DefaultSourceRootScope {
     pub(crate) original_source_root: PathBuf,
     /// Resolved path for later filesystem work.
     pub(crate) resolved_traversal_root: PathBuf,
-    /// Album declarations without directory selectors that require this scope,
-    /// in declaration order.
-    pub(crate) dependent_album_handles: Vec<String>,
+    /// Handles of collection declarations without directory selectors that require this scope, in
+    /// declaration order.
+    pub(crate) dependent_collection_handles: Vec<String>,
 }
 
 /// Failure to prepare the shared default source root.
@@ -98,9 +98,9 @@ pub(crate) struct DefaultSourceRootScope {
 pub(crate) struct DefaultSourceRootFailure {
     /// Source-root spelling supplied by the caller.
     pub(crate) original_source_root: PathBuf,
-    /// Album declarations without directory selectors requiring this scope, in
+    /// Handles of collection declarations without directory selectors that require this scope, in
     /// declaration order.
-    pub(crate) dependent_album_handles: Vec<String>,
+    pub(crate) dependent_collection_handles: Vec<String>,
     /// Reason preparation failed.
     pub(crate) kind: DefaultSourceRootFailureKind,
 }
@@ -131,59 +131,59 @@ pub(crate) enum DefaultSourceRootFailureKind {
     },
 }
 
-/// Warning that several directory selectors in an album declaration resolved
+/// Warning that several directory selectors in a collection declaration resolved
 /// to the same path.
 #[derive(Debug)]
 pub(crate) struct RedundancyWarning {
-    /// Album with redundant selectors.
-    pub(crate) album_handle: String,
+    /// Handle of the collection declaration containing redundant selectors.
+    pub(crate) collection_handle: String,
     /// Shared resolved path.
     pub(crate) resolved_directory: PathBuf,
     /// Selector spellings in declaration order, including duplicates.
     pub(crate) contributing_selectors: Vec<PathBuf>,
 }
 
-/// Prepares filesystem scopes for albums in `spec` using `source_root`.
+/// Prepares filesystem scopes on behalf of collection declarations in `spec`.
 ///
-/// Each configured directory selector is resolved independently, in album and
+/// Each configured directory selector is resolved independently, in declaration and
 /// selector order. Relative selectors use the supplied root, absolute selectors
 /// ignore it. Selectors that resolve to the same path are grouped within their
 /// declaration. Groups with multiple selectors produce one warning. Failures
 /// are collected and do not stop preparation.
 ///
-/// If any album declaration has no configured directory selector, the root is
+/// If any collection declaration has no configured directory selector, the root is
 /// resolved once and shared by those declarations.
 ///
 /// Configured directory selectors and the default root are checked even if one fails.
 /// Scopes are returned only if all required resolutions succeed, otherwise the
 /// result contains the failures and any warnings from successful groups.
-pub(crate) fn prepare_album_scopes(
+pub(crate) fn prepare_collection_scopes(
     spec: &LibraryBuildSpec,
     source_root: &Path,
-) -> AlbumScopePreparation {
+) -> CollectionScopePreparation {
     let mut configured_directory_scopes: Vec<ConfiguredDirectoryScope> = Vec::new();
     let mut configured_failures: Vec<ConfiguredSelectorFailure> = Vec::new();
     let mut warnings: Vec<RedundancyWarning> = Vec::new();
 
-    // Groups belong to one album; equal paths in other albums stay separate.
-    for (album_handle, album) in spec.albums() {
-        let Some(selectors) = album.directories.as_deref() else {
+    // Groups belong to one declaration; equal paths in other declarations stay separate.
+    for (collection_handle, declaration) in spec.collection_declarations() {
+        let Some(selectors) = declaration.directories.as_deref() else {
             continue;
         };
 
-        let mut album_scopes: Vec<ConfiguredDirectoryScope> = Vec::new();
+        let mut declaration_scopes: Vec<ConfiguredDirectoryScope> = Vec::new();
         for selector in selectors {
             // Resolve every occurrence independently, including duplicates.
-            match resolve_album_directory(source_root, selector) {
+            match resolve_directory_selector(source_root, selector) {
                 Ok(resolved_directory) => {
-                    // See if resolve to same dir as other selector(s) prev
-                    match album_scopes
+                    // group this selector with earlier selectors in this declaration that resolved to the same directory
+                    match declaration_scopes
                         .iter_mut()
                         .find(|scope| scope.resolved_directory == resolved_directory)
                     {
                         Some(scope) => scope.contributing_selectors.push(selector.clone()),
-                        None => album_scopes.push(ConfiguredDirectoryScope {
-                            album_handle: album_handle.to_owned(),
+                        None => declaration_scopes.push(ConfiguredDirectoryScope {
+                            collection_handle: collection_handle.to_owned(),
                             resolved_directory,
                             contributing_selectors: vec![selector.clone()],
                         }),
@@ -191,41 +191,41 @@ pub(crate) fn prepare_album_scopes(
                 }
                 // Accumulate errors and continue
                 Err(error) => configured_failures.push(ConfiguredSelectorFailure {
-                    album_handle: album_handle.to_owned(),
+                    collection_handle: collection_handle.to_owned(),
                     configured_selector: selector.clone(),
                     error,
                 }),
             }
         }
 
-        for scope in &album_scopes {
+        for scope in &declaration_scopes {
             if scope.contributing_selectors.len() >= 2 {
                 warnings.push(RedundancyWarning {
-                    album_handle: scope.album_handle.clone(),
+                    collection_handle: scope.collection_handle.clone(),
                     resolved_directory: scope.resolved_directory.clone(),
                     contributing_selectors: scope.contributing_selectors.clone(),
                 });
             }
         }
-        configured_directory_scopes.extend(album_scopes);
+        configured_directory_scopes.extend(declaration_scopes);
     }
 
-    let dependent_album_handles: Vec<String> = spec
-        .albums()
-        .filter(|(_, album)| album.directories.is_none())
-        .map(|(album_handle, _)| album_handle.to_owned())
+    let dependent_collection_handles: Vec<String> = spec
+        .collection_declarations()
+        .filter(|(_, declaration)| declaration.directories.is_none())
+        .map(|(collection_handle, _)| collection_handle.to_owned())
         .collect();
 
-    // Only prepare a default root when at least one album needs it.
+    // Only prepare a default root when at least one declaration needs it.
     let mut default_source_root_scope = None;
     let mut default_source_root_failure = None;
-    if !dependent_album_handles.is_empty() {
-        match prepare_default_source_root(source_root, &dependent_album_handles) {
+    if !dependent_collection_handles.is_empty() {
+        match prepare_default_source_root(source_root, &dependent_collection_handles) {
             Ok(scope) => default_source_root_scope = Some(scope),
             Err(kind) => {
                 default_source_root_failure = Some(DefaultSourceRootFailure {
                     original_source_root: source_root.to_path_buf(),
-                    dependent_album_handles,
+                    dependent_collection_handles,
                     kind,
                 });
             }
@@ -233,15 +233,15 @@ pub(crate) fn prepare_album_scopes(
     }
 
     if configured_failures.is_empty() && default_source_root_failure.is_none() {
-        AlbumScopePreparation::Prepared {
-            scopes: PreparedAlbumScopes {
+        CollectionScopePreparation::Prepared {
+            scopes: PreparedCollectionScopes {
                 configured_directory_scopes,
                 default_source_root_scope,
             },
             warnings,
         }
     } else {
-        AlbumScopePreparation::Failed {
+        CollectionScopePreparation::Failed {
             configured_failures,
             default_source_root_failure,
             warnings,
@@ -249,12 +249,12 @@ pub(crate) fn prepare_album_scopes(
     }
 }
 
-/// Resolves and checks the shared source root for albums that need it.
+/// Resolves and checks the shared source root for declarations that need it.
 ///
 /// The scope keeps both the caller's spelling and the resolved directory.
 fn prepare_default_source_root(
     source_root: &Path,
-    dependent_album_handles: &[String],
+    dependent_collection_handles: &[String],
 ) -> Result<DefaultSourceRootScope, DefaultSourceRootFailureKind> {
     if source_root.as_os_str().is_empty() {
         return Err(DefaultSourceRootFailureKind::EmptyInput);
@@ -281,7 +281,7 @@ fn prepare_default_source_root(
     Ok(DefaultSourceRootScope {
         original_source_root: source_root.to_path_buf(),
         resolved_traversal_root,
-        dependent_album_handles: dependent_album_handles.to_vec(),
+        dependent_collection_handles: dependent_collection_handles.to_vec(),
     })
 }
 
@@ -371,31 +371,31 @@ mod tests {
     }
 
     fn expect_failed(
-        preparation: AlbumScopePreparation,
+        preparation: CollectionScopePreparation,
     ) -> (
         Vec<ConfiguredSelectorFailure>,
         Option<DefaultSourceRootFailure>,
         Vec<RedundancyWarning>,
     ) {
         match preparation {
-            AlbumScopePreparation::Failed {
+            CollectionScopePreparation::Failed {
                 configured_failures,
                 default_source_root_failure,
                 warnings,
             } => (configured_failures, default_source_root_failure, warnings),
-            AlbumScopePreparation::Prepared { scopes, warnings } => {
+            CollectionScopePreparation::Prepared { scopes, warnings } => {
                 panic!("expected failure, got prepared scopes {scopes:?} and warnings {warnings:?}")
             }
         }
     }
 
     #[test]
-    fn zero_albums_succeed_without_inspecting_a_nonexistent_root() {
+    fn zero_collections_succeed_without_inspecting_a_nonexistent_root() {
         let sandbox = TempSandbox::new();
         let missing_root = sandbox.path().join("missing-root");
         let spec = parse_spec("");
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &missing_root));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &missing_root));
 
         assert!(scopes.configured_directory_scopes.is_empty());
         assert!(scopes.default_source_root_scope.is_none());
@@ -403,19 +403,19 @@ mod tests {
     }
 
     #[test]
-    fn configured_only_albums_prepare_no_default_source_root() {
+    fn configured_only_collections_prepare_no_default_source_root() {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         fs::create_dir(source.join("Lateralus")).expect("create album directory");
-        let spec = parse_spec("[albums.tool]\ndirectory = \"Lateralus\"\n");
+        let spec = parse_spec("[collections.tool]\ndirectory = \"Lateralus\"\n");
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
 
         assert!(scopes.default_source_root_scope.is_none());
         assert!(warnings.is_empty());
         assert_eq!(scopes.configured_directory_scopes.len(), 1);
         let scope = &scopes.configured_directory_scopes[0];
-        assert_eq!(scope.album_handle, "tool");
+        assert_eq!(scope.collection_handle, "tool");
         assert_eq!(
             scope.resolved_directory,
             canonical(&source.join("Lateralus"))
@@ -432,11 +432,11 @@ mod tests {
         let missing_root = sandbox.path().join("missing-root");
         // Checking this missing root would fail, so success means it was skipped.
         let spec = parse_spec(&format!(
-            "[albums.tool]\ndirectory = {}\n",
+            "[collections.tool]\ndirectory = {}\n",
             toml_string(&target)
         ));
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &missing_root));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &missing_root));
 
         assert!(scopes.default_source_root_scope.is_none());
         assert!(warnings.is_empty());
@@ -448,47 +448,47 @@ mod tests {
     }
 
     #[test]
-    fn one_dependent_album_prepares_the_default_source_root() {
+    fn one_dependent_collection_prepares_the_default_source_root() {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
-        let spec = parse_spec("[albums.tool]\nname = \"Tool\"\n");
+        let spec = parse_spec("[collections.tool]\nname = \"Tool\"\n");
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
 
         assert!(scopes.configured_directory_scopes.is_empty());
         assert!(warnings.is_empty());
         let default_scope = scopes
             .default_source_root_scope
-            .expect("the dependent album must produce a default source-root scope");
+            .expect("the dependent collection must produce a default source-root scope");
         assert_eq!(
             default_scope.original_source_root.as_os_str(),
             source.as_os_str()
         );
         assert_eq!(default_scope.resolved_traversal_root, canonical(&source));
-        assert_eq!(default_scope.dependent_album_handles, ["tool"]);
+        assert_eq!(default_scope.dependent_collection_handles, ["tool"]);
     }
 
     #[test]
-    fn several_dependent_albums_retain_declaration_order() {
+    fn several_dependent_collections_retain_declaration_order() {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         fs::create_dir(source.join("Lateralus")).expect("create album directory");
         let spec = parse_spec(
-            "[albums.z]\nname = \"Z\"\n\
-             [albums.a]\nname = \"A\"\n\
-             [albums.m]\ndirectory = \"Lateralus\"\n\
-             [albums.q]\nartist = \"Q\"\n",
+            "[collections.z]\nname = \"Z\"\n\
+             [collections.a]\nname = \"A\"\n\
+             [collections.m]\ndirectory = \"Lateralus\"\n\
+             [collections.q]\nartist = \"Q\"\n",
         );
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
 
         assert!(warnings.is_empty());
         assert_eq!(scopes.configured_directory_scopes.len(), 1);
-        assert_eq!(scopes.configured_directory_scopes[0].album_handle, "m");
+        assert_eq!(scopes.configured_directory_scopes[0].collection_handle, "m");
         let default_scope = scopes
             .default_source_root_scope
-            .expect("dependent albums must produce a default source-root scope");
-        assert_eq!(default_scope.dependent_album_handles, ["z", "a", "q"]);
+            .expect("dependent collections must produce a default source-root scope");
+        assert_eq!(default_scope.dependent_collection_handles, ["z", "a", "q"]);
         assert_eq!(default_scope.resolved_traversal_root, canonical(&source));
     }
 
@@ -497,13 +497,13 @@ mod tests {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let spelling = source.join(".");
-        let spec = parse_spec("[albums.tool]\nname = \"Tool\"\n");
+        let spec = parse_spec("[collections.tool]\nname = \"Tool\"\n");
 
-        let (scopes, _) = expect_prepared(prepare_album_scopes(&spec, &spelling));
+        let (scopes, _) = expect_prepared(prepare_collection_scopes(&spec, &spelling));
 
         let default_scope = scopes
             .default_source_root_scope
-            .expect("dependent album must produce a default source-root scope");
+            .expect("dependent collection must produce a default source-root scope");
         assert_eq!(
             default_scope.original_source_root.as_os_str(),
             spelling.as_os_str()
@@ -518,44 +518,45 @@ mod tests {
 
     #[test]
     fn exactly_empty_default_source_root_is_rejected() {
-        let spec = parse_spec("[albums.tool]\nname = \"Tool\"\n");
+        let spec = parse_spec("[collections.tool]\nname = \"Tool\"\n");
 
         let (configured_failures, default_failure, warnings) =
-            expect_failed(prepare_album_scopes(&spec, Path::new("")));
+            expect_failed(prepare_collection_scopes(&spec, Path::new("")));
 
         assert!(configured_failures.is_empty());
         assert!(warnings.is_empty());
-        let failure = default_failure.expect("the dependent album must fail with the empty root");
+        let failure =
+            default_failure.expect("the dependent collection must fail with the empty root");
         assert!(matches!(
             failure.kind,
             DefaultSourceRootFailureKind::EmptyInput
         ));
         assert_eq!(failure.original_source_root.as_os_str(), OsStr::new(""));
-        assert_eq!(failure.dependent_album_handles, ["tool"]);
+        assert_eq!(failure.dependent_collection_handles, ["tool"]);
     }
     #[test]
     fn whitespace_only_default_source_root_is_not_empty_input() {
-        let spec = parse_spec("[albums.tool]\nname = \"Tool\"\n");
+        let spec = parse_spec("[collections.tool]\nname = \"Tool\"\n");
 
         // Resolution depends on the test's working directory; only check that
         // whitespace is not classified as empty.
-        match prepare_album_scopes(&spec, Path::new("   ")) {
-            AlbumScopePreparation::Prepared { scopes, warnings } => {
+        match prepare_collection_scopes(&spec, Path::new("   ")) {
+            CollectionScopePreparation::Prepared { scopes, warnings } => {
                 assert!(warnings.is_empty());
                 let default_scope = scopes
                     .default_source_root_scope
-                    .expect("the dependent album must produce a default source-root scope");
+                    .expect("the dependent collection must produce a default source-root scope");
                 assert_eq!(
                     default_scope.original_source_root.as_os_str(),
                     OsStr::new("   ")
                 );
             }
-            AlbumScopePreparation::Failed {
+            CollectionScopePreparation::Failed {
                 default_source_root_failure,
                 ..
             } => {
                 let failure = default_source_root_failure
-                    .expect("the dependent album must observe the whitespace root");
+                    .expect("the dependent collection must observe the whitespace root");
                 assert_eq!(failure.original_source_root.as_os_str(), OsStr::new("   "));
                 assert!(
                     !matches!(failure.kind, DefaultSourceRootFailureKind::EmptyInput),
@@ -572,19 +573,20 @@ mod tests {
     fn missing_default_source_root_reports_native_resolution_failure() {
         let sandbox = TempSandbox::new();
         let missing_root = sandbox.path().join("missing-root");
-        let spec = parse_spec("[albums.tool]\nname = \"Tool\"\n");
+        let spec = parse_spec("[collections.tool]\nname = \"Tool\"\n");
 
         let (configured_failures, default_failure, warnings) =
-            expect_failed(prepare_album_scopes(&spec, &missing_root));
+            expect_failed(prepare_collection_scopes(&spec, &missing_root));
 
         assert!(configured_failures.is_empty());
         assert!(warnings.is_empty());
-        let failure = default_failure.expect("the dependent album must fail resolving the root");
+        let failure =
+            default_failure.expect("the dependent collection must fail resolving the root");
         assert_eq!(
             failure.original_source_root.as_os_str(),
             missing_root.as_os_str()
         );
-        assert_eq!(failure.dependent_album_handles, ["tool"]);
+        assert_eq!(failure.dependent_collection_handles, ["tool"]);
         match failure.kind {
             DefaultSourceRootFailureKind::ResolutionFailed { error } => {
                 assert_native_canonicalize_error(&error, &missing_root);
@@ -598,11 +600,12 @@ mod tests {
         let sandbox = TempSandbox::new();
         let file = sandbox.path().join("source-file");
         fs::write(&file, b"not a directory").expect("write file");
-        let spec = parse_spec("[albums.tool]\nname = \"Tool\"\n");
+        let spec = parse_spec("[collections.tool]\nname = \"Tool\"\n");
 
-        let (_, default_failure, _) = expect_failed(prepare_album_scopes(&spec, &file));
+        let (_, default_failure, _) = expect_failed(prepare_collection_scopes(&spec, &file));
 
-        let failure = default_failure.expect("the dependent album must fail inspecting the file");
+        let failure =
+            default_failure.expect("the dependent collection must fail inspecting the file");
         match failure.kind {
             DefaultSourceRootFailureKind::ResolvedTargetNotDirectory { resolved_path } => {
                 assert_eq!(resolved_path, canonical(&file));
@@ -617,20 +620,20 @@ mod tests {
         let source = create_source(&sandbox);
         let album = source.join("Lateralus");
         fs::create_dir(&album).expect("create album directory");
-        let spec = parse_spec("[albums.tool]\ndirectories = [\"Lateralus\", \"Lateralus\"]\n");
+        let spec = parse_spec("[collections.tool]\ndirectories = [\"Lateralus\", \"Lateralus\"]\n");
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
 
         assert_eq!(scopes.configured_directory_scopes.len(), 1);
         let scope = &scopes.configured_directory_scopes[0];
-        assert_eq!(scope.album_handle, "tool");
+        assert_eq!(scope.collection_handle, "tool");
         assert_eq!(scope.resolved_directory, canonical(&album));
         assert_eq!(scope.contributing_selectors.len(), 2);
         assert_spelling(&scope.contributing_selectors[0], "Lateralus");
         assert_spelling(&scope.contributing_selectors[1], "Lateralus");
 
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].album_handle, "tool");
+        assert_eq!(warnings[0].collection_handle, "tool");
         assert_eq!(warnings[0].resolved_directory, canonical(&album));
         assert_eq!(
             warnings[0].contributing_selectors,
@@ -645,10 +648,10 @@ mod tests {
         let album = source.join("Lateralus");
         fs::create_dir(&album).expect("create album directory");
         let spec = parse_spec(
-            "[albums.tool]\ndirectories = [\"Lateralus\", \"./Lateralus\", \"Lateralus\"]\n",
+            "[collections.tool]\ndirectories = [\"Lateralus\", \"./Lateralus\", \"Lateralus\"]\n",
         );
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
 
         assert_eq!(scopes.configured_directory_scopes.len(), 1);
         let scope = &scopes.configured_directory_scopes[0];
@@ -673,9 +676,9 @@ mod tests {
         fs::create_dir(source.join("album-one")).expect("create album-one");
         fs::create_dir(source.join("album-two")).expect("create album-two");
         // Reverse lexical order checks that groups follow declaration order.
-        let spec = parse_spec("[albums.tool]\ndirectories = [\"album-two\", \"album-one\"]\n");
+        let spec = parse_spec("[collections.tool]\ndirectories = [\"album-two\", \"album-one\"]\n");
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
 
         assert!(warnings.is_empty());
         assert_eq!(scopes.configured_directory_scopes.len(), 2);
@@ -701,11 +704,11 @@ mod tests {
 
         for selectors in [["parent", "parent/child"], ["parent/child", "parent"]] {
             let spec = parse_spec(&format!(
-                "[albums.tool]\ndirectories = [\"{}\", \"{}\"]\n",
+                "[collections.tool]\ndirectories = [\"{}\", \"{}\"]\n",
                 selectors[0], selectors[1]
             ));
 
-            let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+            let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
 
             assert!(warnings.is_empty(), "case {selectors:?}");
             assert_eq!(
@@ -726,25 +729,31 @@ mod tests {
     }
 
     #[test]
-    fn equal_configured_roots_across_albums_remain_separate() {
+    fn equal_configured_roots_across_collections_remain_separate() {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let album = source.join("Lateralus");
         fs::create_dir(&album).expect("create album directory");
         let spec = parse_spec(
-            "[albums.one]\ndirectory = \"Lateralus\"\n\
-             [albums.two]\ndirectory = \"Lateralus\"\n",
+            "[collections.one]\ndirectory = \"Lateralus\"\n\
+             [collections.two]\ndirectory = \"Lateralus\"\n",
         );
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
 
         assert!(
             warnings.is_empty(),
-            "one contributor per album produces no warning"
+            "one contributor per collection produces no warning"
         );
         assert_eq!(scopes.configured_directory_scopes.len(), 2);
-        assert_eq!(scopes.configured_directory_scopes[0].album_handle, "one");
-        assert_eq!(scopes.configured_directory_scopes[1].album_handle, "two");
+        assert_eq!(
+            scopes.configured_directory_scopes[0].collection_handle,
+            "one"
+        );
+        assert_eq!(
+            scopes.configured_directory_scopes[1].collection_handle,
+            "two"
+        );
         for scope in &scopes.configured_directory_scopes {
             assert_eq!(scope.resolved_directory, canonical(&album));
             assert_eq!(scope.contributing_selectors.len(), 1);
@@ -756,11 +765,11 @@ mod tests {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let spec = parse_spec(
-            "[albums.one]\ndirectory = \".\"\n\
-             [albums.two]\nname = \"Two\"\n",
+            "[collections.one]\ndirectory = \".\"\n\
+             [collections.two]\nname = \"Two\"\n",
         );
 
-        let (scopes, warnings) = expect_prepared(prepare_album_scopes(&spec, &source));
+        let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
 
         assert!(
             warnings.is_empty(),
@@ -768,12 +777,12 @@ mod tests {
         );
         assert_eq!(scopes.configured_directory_scopes.len(), 1);
         let configured = &scopes.configured_directory_scopes[0];
-        assert_eq!(configured.album_handle, "one");
+        assert_eq!(configured.collection_handle, "one");
         assert_eq!(configured.resolved_directory, canonical(&source));
         let default_scope = scopes
             .default_source_root_scope
-            .expect("the dependent album must produce a default source-root scope");
-        assert_eq!(default_scope.dependent_album_handles, ["two"]);
+            .expect("the dependent collection must produce a default source-root scope");
+        assert_eq!(default_scope.dependent_collection_handles, ["two"]);
         assert_eq!(default_scope.resolved_traversal_root, canonical(&source));
     }
 
@@ -781,14 +790,14 @@ mod tests {
     fn repeated_missing_selectors_produce_repeated_ordered_failures() {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
-        let spec = parse_spec("[albums.tool]\ndirectories = [\"missing\", \"missing\"]\n");
+        let spec = parse_spec("[collections.tool]\ndirectories = [\"missing\", \"missing\"]\n");
 
         let (configured_failures, default_failure, warnings) =
-            expect_failed(prepare_album_scopes(&spec, &source));
+            expect_failed(prepare_collection_scopes(&spec, &source));
 
         assert!(
             default_failure.is_none(),
-            "a configured album is not dependent on the default root"
+            "a configured collection is not dependent on the default root"
         );
         assert!(warnings.is_empty());
         assert_eq!(
@@ -797,7 +806,7 @@ mod tests {
             "repeated failures stay separate"
         );
         for failure in &configured_failures {
-            assert_eq!(failure.album_handle, "tool");
+            assert_eq!(failure.collection_handle, "tool");
             assert_spelling(&failure.configured_selector, "missing");
             assert_native_canonicalize_error(&failure.error, &source.join("missing"));
         }
@@ -807,10 +816,10 @@ mod tests {
     fn distinct_missing_selectors_retain_occurrence_order() {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
-        let spec = parse_spec("[albums.tool]\ndirectories = [\"missing-b\", \"missing-a\"]\n");
+        let spec = parse_spec("[collections.tool]\ndirectories = [\"missing-b\", \"missing-a\"]\n");
 
         let (configured_failures, default_failure, warnings) =
-            expect_failed(prepare_album_scopes(&spec, &source));
+            expect_failed(prepare_collection_scopes(&spec, &source));
 
         assert!(default_failure.is_none());
         assert!(warnings.is_empty());
@@ -832,30 +841,30 @@ mod tests {
         fs::create_dir(source.join("album-one")).expect("create album-one");
         fs::create_dir(source.join("album-two")).expect("create album-two");
         let spec = parse_spec(
-            "[albums.one]\ndirectories = [\"album-one\", \"missing\", \"album-one\"]\n\
-             [albums.two]\ndirectories = [\"missing\"]\n\
-             [albums.three]\ndirectories = [\"album-two\", \"album-two\"]\n",
+            "[collections.one]\ndirectories = [\"album-one\", \"missing\", \"album-one\"]\n\
+             [collections.two]\ndirectories = [\"missing\"]\n\
+             [collections.three]\ndirectories = [\"album-two\", \"album-two\"]\n",
         );
 
         // Failure returns no scopes but keeps diagnostics and warnings.
         let (configured_failures, default_failure, warnings) =
-            expect_failed(prepare_album_scopes(&spec, &source));
+            expect_failed(prepare_collection_scopes(&spec, &source));
 
         assert!(default_failure.is_none());
         assert_eq!(configured_failures.len(), 2);
-        assert_eq!(configured_failures[0].album_handle, "one");
+        assert_eq!(configured_failures[0].collection_handle, "one");
         assert_spelling(&configured_failures[0].configured_selector, "missing");
-        assert_eq!(configured_failures[1].album_handle, "two");
+        assert_eq!(configured_failures[1].collection_handle, "two");
         assert_spelling(&configured_failures[1].configured_selector, "missing");
 
         assert_eq!(warnings.len(), 2, "successful groups still warn on failure");
-        assert_eq!(warnings[0].album_handle, "one");
+        assert_eq!(warnings[0].collection_handle, "one");
         assert_eq!(
             warnings[0].resolved_directory,
             canonical(&source.join("album-one"))
         );
         assert_eq!(warnings[0].contributing_selectors.len(), 2);
-        assert_eq!(warnings[1].album_handle, "three");
+        assert_eq!(warnings[1].collection_handle, "three");
         assert_eq!(
             warnings[1].resolved_directory,
             canonical(&source.join("album-two"))
@@ -869,21 +878,22 @@ mod tests {
         let missing_root = sandbox.path().join("missing-root");
         let missing_album = sandbox.path().join("missing-album");
         let spec = parse_spec(&format!(
-            "[albums.one]\ndirectory = {}\n\
-             [albums.two]\nname = \"Two\"\n",
+            "[collections.one]\ndirectory = {}\n\
+             [collections.two]\nname = \"Two\"\n",
             toml_string(&missing_album)
         ));
 
         let (configured_failures, default_failure, warnings) =
-            expect_failed(prepare_album_scopes(&spec, &missing_root));
+            expect_failed(prepare_collection_scopes(&spec, &missing_root));
 
         assert!(warnings.is_empty());
         assert_eq!(configured_failures.len(), 1);
-        assert_eq!(configured_failures[0].album_handle, "one");
+        assert_eq!(configured_failures[0].collection_handle, "one");
         assert_native_canonicalize_error(&configured_failures[0].error, &missing_album);
 
-        let failure = default_failure.expect("the dependent album must fail on the missing root");
-        assert_eq!(failure.dependent_album_handles, ["two"]);
+        let failure =
+            default_failure.expect("the dependent collection must fail on the missing root");
+        assert_eq!(failure.dependent_collection_handles, ["two"]);
         assert!(matches!(
             failure.kind,
             DefaultSourceRootFailureKind::ResolutionFailed { .. }
@@ -900,15 +910,15 @@ mod tests {
         fs::write(source.join("album-two/02-track.flac"), b"other bytes").expect("write track");
         fs::write(source.join("sentinel.txt"), b"sentinel").expect("write sentinel");
         let spec = parse_spec(
-            "[albums.one]\ndirectory = \"album-one\"\n\
-             [albums.one-again]\ndirectory = \"album-one\"\n\
-             [albums.two]\ndirectory = \"album-two\"\n\
-             [albums.gone]\ndirectory = \"no-such-album\"\n\
-             [albums.dependent]\nname = \"Dependent\"\n",
+            "[collections.one]\ndirectory = \"album-one\"\n\
+             [collections.one-again]\ndirectory = \"album-one\"\n\
+             [collections.two]\ndirectory = \"album-two\"\n\
+             [collections.gone]\ndirectory = \"no-such-album\"\n\
+             [collections.dependent]\nname = \"Dependent\"\n",
         );
 
         let snapshot = SourceTreeSnapshot::capture(&source);
-        let preparation = prepare_album_scopes(&spec, &source);
+        let preparation = prepare_collection_scopes(&spec, &source);
         snapshot.assert_unchanged();
 
         let (configured_failures, default_failure, _) = expect_failed(preparation);
@@ -1006,10 +1016,10 @@ mod tests {
 
         #[test]
         fn unsupported_default_root_form_is_typed_without_filesystem_work() {
-            let dependent_album_handles = vec!["tool".to_owned()];
+            let dependent_collection_handles = vec!["tool".to_owned()];
 
             // Reject a drive-relative root before filesystem resolution.
-            let kind = prepare_default_source_root(Path::new("C:"), &dependent_album_handles)
+            let kind = prepare_default_source_root(Path::new("C:"), &dependent_collection_handles)
                 .expect_err("drive-relative root must be rejected");
             assert!(
                 matches!(kind, DefaultSourceRootFailureKind::UnsupportedPathForm),

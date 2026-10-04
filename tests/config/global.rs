@@ -8,12 +8,13 @@
 //! accepted prototype example.
 
 use scarab::{
-    Codec, EncodingProfile, Files, InvalidLibraryBuildSpec, SizeMode, TrackAction, TrackTarget,
+    Codec, CollectionDeclaration, EncodingProfile, FilesConfig, InvalidLibraryBuildSpec, SizeMode,
+    TrackAction, TrackTarget,
 };
 
 use super::{invalid, prefixed, rejects_toml, valid};
 
-/// Accepted prototype example: target-size mode and a multi-album rule.
+/// Accepted prototype example: target-size mode and a multi-collection rule.
 const ACCEPTED_EXAMPLE: &str = r#"codec = "opus"
 encoding_profile = "music"
 target_size = "20 GiB"
@@ -22,20 +23,20 @@ target_size = "20 GiB"
 album_art = true
 include = ["lrc"]
 
-[albums.lateralus]
+[collections.lateralus]
 name = "Lateralus"
 artist = "Tool"
 
-[albums.ten_thousand_days]
+[collections.ten_thousand_days]
 name = "10,000 Days"
 artist = "Tool"
 
-[[album_rules]]
-albums = ["lateralus", "ten_thousand_days"]
+[[collection_rules]]
+collections = ["lateralus", "ten_thousand_days"]
 bitrate = 160
 
 [[track_rules]]
-album = "lateralus"
+collection = "lateralus"
 rules = [
     { track = "Faaip de Oiad", exclude = true },
     { tracks = ["Parabol", "Parabola"], bitrate = 192 },
@@ -54,30 +55,30 @@ fn parses_accepted_toml_example() {
     assert_eq!(config.files().exclude, None);
 
     let lateralus = config
-        .album("lateralus")
+        .collection_declaration("lateralus")
         .expect("lateralus must be declared");
     assert_eq!(lateralus.name.as_deref(), Some("Lateralus"));
     assert_eq!(lateralus.artist.as_deref(), Some("Tool"));
     assert_eq!(lateralus.directories, None);
 
     let ten_thousand_days = config
-        .album("ten_thousand_days")
+        .collection_declaration("ten_thousand_days")
         .expect("ten_thousand_days must be declared");
     assert_eq!(ten_thousand_days.name.as_deref(), Some("10,000 Days"));
     assert_eq!(ten_thousand_days.artist.as_deref(), Some("Tool"));
     assert_eq!(ten_thousand_days.directories, None);
 
-    let album_rules = config.album_rules();
-    assert_eq!(album_rules.len(), 1);
+    let collection_rules = config.collection_rules();
+    assert_eq!(collection_rules.len(), 1);
     assert_eq!(
-        album_rules[0].album_handles,
+        collection_rules[0].collection_handles,
         ["lateralus", "ten_thousand_days"]
     );
-    assert_eq!(album_rules[0].bitrate, 160);
+    assert_eq!(collection_rules[0].bitrate, 160);
 
     let groups = config.track_rules();
     assert_eq!(groups.len(), 1);
-    assert_eq!(groups[0].album_handle, "lateralus");
+    assert_eq!(groups[0].collection_handle, "lateralus");
 
     let rules = &groups[0].rules;
     assert_eq!(rules.len(), 2);
@@ -97,14 +98,16 @@ fn minimal_config_defaults_to_music_profile() {
     assert_eq!(config.codec(), Codec::Opus);
     assert_eq!(config.encoding_profile(), EncodingProfile::Music);
     assert_eq!(config.size_mode(), &SizeMode::Bitrate(128));
-    assert_eq!(config.files(), &Files::default());
+    assert_eq!(config.files(), &FilesConfig::default());
 
-    let album = config.album("aenima").expect("aenima must be declared");
-    assert_eq!(album.name.as_deref(), Some("Ænima"));
-    assert_eq!(album.artist.as_deref(), Some("Tool"));
-    assert_eq!(album.directories, None);
+    let declaration: &CollectionDeclaration = config
+        .collection_declaration("aenima")
+        .expect("aenima must be declared");
+    assert_eq!(declaration.name.as_deref(), Some("Ænima"));
+    assert_eq!(declaration.artist.as_deref(), Some("Tool"));
+    assert_eq!(declaration.directories, None);
 
-    assert!(config.album_rules().is_empty());
+    assert!(config.collection_rules().is_empty());
     assert!(config.track_rules().is_empty());
 }
 
@@ -136,21 +139,41 @@ fn rejects_unknown_keys_at_every_boundary() {
     rejects_toml("codec = \"opus\"\nbitrate = 128\nbogus = true\n");
     // [files]
     rejects_toml("codec = \"opus\"\nbitrate = 128\n[files]\nbogus = true\n");
-    // [albums.<handle>]
+    // [collections.<handle>]
     rejects_toml(
-        "codec = \"opus\"\nbitrate = 128\n[albums.aenima]\nname = \"Ænima\"\nartist = \"Tool\"\nyear = 1996\n",
+        "codec = \"opus\"\nbitrate = 128\n[collections.aenima]\nname = \"Ænima\"\nartist = \"Tool\"\nyear = 1996\n",
     );
-    // [[album_rules]]
+    // [[collection_rules]]
     rejects_toml(&prefixed(
-        "[[album_rules]]\nalbums = [\"aenima\"]\nbitrate = 96\nbogus = true\n",
+        "[[collection_rules]]\ncollections = [\"aenima\"]\nbitrate = 96\nbogus = true\n",
     ));
     // [[track_rules]]
     rejects_toml(&prefixed(
-        "[[track_rules]]\nalbum = \"aenima\"\nrules = [{ track = \"Stinkfist\", bitrate = 64 }]\nbogus = true\n",
+        "[[track_rules]]\ncollection = \"aenima\"\nrules = [{ track = \"Stinkfist\", bitrate = 64 }]\nbogus = true\n",
     ));
     // nested track-rule entry
     rejects_toml(&prefixed(
-        "[[track_rules]]\nalbum = \"aenima\"\nrules = [{ track = \"Stinkfist\", bitrate = 64, bogus = true }]\n",
+        "[[track_rules]]\ncollection = \"aenima\"\nrules = [{ track = \"Stinkfist\", bitrate = 64, bogus = true }]\n",
+    ));
+}
+
+#[test]
+fn rejects_replaced_album_schema_spellings_alongside_valid_collection_spellings() {
+    rejects_toml(
+        "codec = \"opus\"\nbitrate = 128\n\
+         [collections.aenima]\nname = \"Ænima\"\n\
+         [albums.legacy]\ndirectory = \"legacy\"\n",
+    );
+    rejects_toml(&prefixed(
+        "[[collection_rules]]\ncollections = [\"aenima\"]\nbitrate = 96\n\
+         [[album_rules]]\nalbums = [\"aenima\"]\nbitrate = 64\n",
+    ));
+    rejects_toml(&prefixed(
+        "[[collection_rules]]\ncollections = [\"aenima\"]\nalbums = [\"aenima\"]\nbitrate = 96\n",
+    ));
+    rejects_toml(&prefixed(
+        "[[track_rules]]\ncollection = \"aenima\"\nalbum = \"aenima\"\n\
+         rules = [{ track = \"Stinkfist\", exclude = true }]\n",
     ));
 }
 

@@ -10,7 +10,7 @@
 //! The path is not required to have come from discovery or inventory.
 //!
 //! Classification does not establish existence, ordinary-file status, readability,
-//! valid media, probe success, album membership, logical-track identity, or output selection.
+//! valid media, probe success, collection membership, logical-track identity, or output selection.
 //!
 //! The classifier performs no filesystem, process, or configuration access and
 //! never canonicalizes or rewrites paths.

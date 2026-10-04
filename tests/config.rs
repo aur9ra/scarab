@@ -8,17 +8,18 @@
 //!
 //! Tests are split by configuration-level concern into modules under
 //! `tests/config/`: whole-document/global configuration (`global.rs`),
-//! `[files]`, `[albums.<handle>]`, `[[album_rules]]`, and `[[track_rules]]`.
+//! `[files]`, `[collections.<handle>]`, `[[collection_rules]]`, and
+//! `[[track_rules]]`.
 //!
 //! The modules are wired with explicit `#[path]` attributes because a plain
-//! child declaration such as `mod albums;` from this crate root would resolve
+//! child declaration such as `mod collections;` from this crate root would resolve
 //! beside the root under `tests/`, not under `tests/config/`.
 
-#[path = "config/album_rules.rs"]
-mod album_rules;
+#[path = "config/collection_rules.rs"]
+mod collection_rules;
 
-#[path = "config/albums.rs"]
-mod albums;
+#[path = "config/collections.rs"]
+mod collections;
 
 #[path = "config/files.rs"]
 mod files;
@@ -31,10 +32,10 @@ mod track_rules;
 
 use scarab::{InvalidLibraryBuildSpec, LibraryBuildSpec, LibraryBuildSpecError, parse};
 
-/// Valid top-level keys followed by one declared album. Top-level keys must
+/// Valid top-level keys followed by one collection declaration. Top-level keys must
 /// precede tables in TOML, so tests append only tables to this prefix.
 const PREFIX: &str =
-    "codec = \"opus\"\nbitrate = 128\n[albums.aenima]\nname = \"Ænima\"\nartist = \"Tool\"\n";
+    "codec = \"opus\"\nbitrate = 128\n[collections.aenima]\nname = \"Ænima\"\nartist = \"Tool\"\n";
 
 fn prefixed(body: &str) -> String {
     format!("{PREFIX}{body}")
@@ -65,7 +66,7 @@ fn rejects_toml(text: &str) {
     }
 }
 
-/// One standalone album declaration on top of the minimal global config.
-fn album_config(handle: &str, body: &str) -> String {
-    format!("codec = \"opus\"\nbitrate = 128\n[albums.{handle}]\n{body}")
+/// One standalone collection declaration on top of the minimal global config.
+fn collection_config(handle: &str, body: &str) -> String {
+    format!("codec = \"opus\"\nbitrate = 128\n[collections.{handle}]\n{body}")
 }

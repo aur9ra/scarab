@@ -53,7 +53,7 @@ pub enum SizeMode {
     TargetSize(String),
 }
 
-/// Optional selection for the output library.
+/// Optional file-handling configuration for the output library.
 ///
 /// `include` and `exclude` may both be configured. Selection semantics are
 /// not applied by this parser.
@@ -63,7 +63,7 @@ pub enum SizeMode {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct Files {
+pub struct FilesConfig {
     /// Copy a standalone front cover when one is found.
     pub album_art: Option<bool>,
     /// File extensions to include.
@@ -72,7 +72,7 @@ pub struct Files {
     pub exclude: Option<Vec<String>>,
 }
 
-/// Optional selectors for one declared album.
+/// Membership criteria for one declared collection.
 ///
 /// `name` and `artist` are optional, independent metadata selectors. Supplied
 /// values are preserved exactly.
@@ -83,47 +83,53 @@ pub struct Files {
 /// shared default source root. Configured selector values are preserved exactly,
 /// including order, duplicates, and relative/absolute spelling.
 ///
+/// This declaration contains criteria, not evaluated members. Aggregate
+/// validation guarantees belong to [`LibraryBuildSpec`], not to detached or
+/// modified declarations.
+///
 /// Non-exhaustive to allow future fields. Downstream crates can access its
 /// public fields but cannot use struct literals or exhaustive patterns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct Album {
+pub struct CollectionDeclaration {
     pub name: Option<String>,
     pub artist: Option<String>,
     pub directories: Option<Vec<PathBuf>>,
 }
 
-/// Raw, pre-validation deserialization target for one `[albums.<handle>]`
+/// Raw, pre-validation deserialization target for one `[collections.<handle>]`
 /// table.
 ///
 /// Keeps the separate singular `directory` and plural `directories` fields
-/// separate until validation collapses them into [`Album::directories`].
+/// separate until validation collapses them into
+/// [`CollectionDeclaration::directories`].
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawAlbum {
+struct RawCollectionDeclaration {
     name: Option<String>,
     artist: Option<String>,
     directory: Option<String>,
     directories: Option<Vec<String>>,
 }
 
-/// A bitrate override applied to every track of one or more declared albums.
+/// A collection-level bitrate output-policy override targeting one or more
+/// collection handles. It does not define membership.
 ///
 /// Non-exhaustive to allow future fields. Downstream crates can access its
 /// public fields but cannot use struct literals or exhaustive patterns.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct AlbumRule {
-    #[serde(rename = "albums")]
-    pub album_handles: Vec<String>,
+pub struct CollectionRule {
+    #[serde(rename = "collections")]
+    pub collection_handles: Vec<String>,
     pub bitrate: u32,
 }
 
-/// A group of track overrides for one declared album.
+/// A group of track output-policy overrides targeting one collection handle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrackRuleGroup {
-    pub album_handle: String,
+    pub collection_handle: String,
     pub rules: Vec<TrackRule>,
 }
 
@@ -159,12 +165,12 @@ pub enum TrackAction {
 /// A validated library configuration returned by [`parse`].
 ///
 /// Validation checks configuration rules only. It does not verify filesystem
-/// resources, album membership, metadata matching, target-size interpretation,
+/// resources, collection membership, metadata matching, target-size interpretation,
 /// or deferred file-selection policy.
 ///
-/// Nested structs expose public fields. [`Files`], [`Album`], [`AlbumRule`],
-/// and [`TrackRule`] are non-exhaustive. Downstream crates can construct
-/// [`TrackRuleGroup`] with a struct literal.
+/// Nested structs expose public fields. [`FilesConfig`], [`CollectionDeclaration`],
+/// [`CollectionRule`], and [`TrackRule`] are non-exhaustive. Downstream crates
+/// can construct [`TrackRuleGroup`] with a struct literal.
 ///
 /// Keep this aggregate for operations that rely on validation. Detached or
 /// modified nested values do not carry its guarantee of validity.
@@ -173,10 +179,10 @@ pub struct LibraryBuildSpec {
     codec: Codec,
     encoding_profile: EncodingProfile,
     size_mode: SizeMode,
-    files: Files,
-    /// Albums keyed by their configuration handles.
-    albums: IndexMap<String, Album>,
-    album_rules: Vec<AlbumRule>,
+    files: FilesConfig,
+    /// Collection declarations keyed by their configuration handles.
+    collection_declarations: IndexMap<String, CollectionDeclaration>,
+    collection_rules: Vec<CollectionRule>,
     track_rules: Vec<TrackRuleGroup>,
 }
 
@@ -196,32 +202,37 @@ impl LibraryBuildSpec {
         &self.size_mode
     }
 
-    /// The configured file selection.
-    pub fn files(&self) -> &Files {
+    /// The configured file-handling options.
+    pub fn files(&self) -> &FilesConfig {
         &self.files
     }
 
-    /// Returns declared albums as `(handle, album)` pairs in declaration order.
+    /// Returns collection declarations as `(handle, declaration)` pairs in declaration order.
     ///
-    /// [`parse`] orders handles by first appearance. Adding fields to an
-    /// existing album does not change its position.
-    pub fn albums(&self) -> impl Iterator<Item = (&str, &Album)> + '_ {
-        self.albums
+    /// [`parse`] orders handles by first appearance. Adding fields to an existing declaration does
+    /// not change its position.
+    pub fn collection_declarations(
+        &self,
+    ) -> impl Iterator<Item = (&str, &CollectionDeclaration)> + '_ {
+        self.collection_declarations
             .iter()
-            .map(|(album_handle, album)| (album_handle.as_str(), album))
+            .map(|(collection_handle, declaration)| (collection_handle.as_str(), declaration))
     }
 
-    /// Returns the album declared under `album_handle`, if any.
+    /// Returns the declaration under `collection_handle`, if any.
     ///
     /// Handles are matched exactly, with no trimming, case folding, or alias
     /// lookup.
-    pub fn album(&self, album_handle: &str) -> Option<&Album> {
-        self.albums.get(album_handle)
+    pub fn collection_declaration(
+        &self,
+        collection_handle: &str,
+    ) -> Option<&CollectionDeclaration> {
+        self.collection_declarations.get(collection_handle)
     }
 
-    /// The configured album rules, in document order.
-    pub fn album_rules(&self) -> &[AlbumRule] {
-        &self.album_rules
+    /// The configured collection rules, in document order.
+    pub fn collection_rules(&self) -> &[CollectionRule] {
+        &self.collection_rules
     }
 
     /// The configured track rule groups, in document order.
@@ -271,37 +282,40 @@ pub enum InvalidLibraryBuildSpec {
     MissingSizeMode,
     /// Both `bitrate` and `target_size` were configured.
     ConflictingSizeMode,
-    /// An `[albums.<handle>]` table configured none of `name`, `artist`,
+    /// A `[collections.<handle>]` table configured none of `name`, `artist`,
     /// `directory`, or `directories`.
-    MissingAlbumSelector { album_handle: String },
-    /// An album configured both `directory` and `directories`.
-    ConflictingAlbumPaths { album_handle: String },
-    /// An album configured an empty `directory` path.
-    EmptyAlbumDirectory { album_handle: String },
-    /// An album configured an empty `directories` list.
-    EmptyAlbumDirectories { album_handle: String },
-    /// An album configured an empty entry in its `directories` list.
-    EmptyAlbumDirectoriesEntry { album_handle: String, index: usize },
-    /// A rule referenced an album handle with no `[albums.<handle>]` entry.
-    UnknownAlbum { album_handle: String },
-    /// An album rule configured an empty `albums` list.
-    EmptyAlbums,
-    /// More than one album rule targeted the same album, including twice
+    MissingCollectionSelector { collection_handle: String },
+    /// A collection declaration configured both TOML keys `directory` and `directories`.
+    ConflictingCollectionDirectoryForms { collection_handle: String },
+    /// A collection configured an empty `directory` path.
+    EmptyCollectionDirectory { collection_handle: String },
+    /// A collection configured an empty `directories` list.
+    EmptyCollectionDirectories { collection_handle: String },
+    /// A collection configured an empty entry in its `directories` list.
+    EmptyCollectionDirectoriesEntry {
+        collection_handle: String,
+        index: usize,
+    },
+    /// A rule references a handle with no `[collections.<handle>]` entry.
+    UnknownCollectionHandle { collection_handle: String },
+    /// A collection rule has no target handles in its TOML `collections` key.
+    EmptyCollectionRuleTargets,
+    /// A collection handle is targeted more than once, including repetition
     /// within one rule.
-    DuplicateAlbumRule { album_handle: String },
-    /// More than one track rule targeted the same track of the same album.
+    DuplicateCollectionRule { collection_handle: String },
+    /// More than one track rule targeted the same track of the same collection.
     DuplicateTrackRule {
-        album_handle: String,
+        collection_handle: String,
         track_name: String,
     },
     /// An explicit `[[track_rules]]` group configured no nested rules.
-    EmptyTrackRules { album_handle: String },
+    EmptyTrackRules { collection_handle: String },
     /// A track rule set both `track` and `tracks`, or neither.
-    TrackTargetNotExclusive { album_handle: String },
+    TrackTargetNotExclusive { collection_handle: String },
     /// A track rule configured an empty `tracks` list.
-    EmptyTracks { album_handle: String },
+    EmptyTracks { collection_handle: String },
     /// A track rule set both `exclude = true` and `bitrate`, or neither.
-    TrackActionNotExclusive { album_handle: String },
+    TrackActionNotExclusive { collection_handle: String },
 }
 
 impl std::error::Error for InvalidLibraryBuildSpec {}
@@ -315,79 +329,88 @@ impl fmt::Display for InvalidLibraryBuildSpec {
             InvalidLibraryBuildSpec::ConflictingSizeMode => {
                 write!(f, "bitrate and target_size are mutually exclusive")
             }
-            InvalidLibraryBuildSpec::MissingAlbumSelector { album_handle } => {
+            InvalidLibraryBuildSpec::MissingCollectionSelector { collection_handle } => {
                 write!(
                     f,
-                    "album `{album_handle}` must set at least one of name, artist, directory, or directories"
+                    "collection `{collection_handle}` must set at least one of the TOML keys `name`, `artist`, `directory`, or `directories`"
                 )
             }
-            InvalidLibraryBuildSpec::ConflictingAlbumPaths { album_handle } => {
+            InvalidLibraryBuildSpec::ConflictingCollectionDirectoryForms { collection_handle } => {
                 write!(
                     f,
-                    "album `{album_handle}` must set at most one of directory or directories"
+                    "collection `{collection_handle}` must set at most one of the TOML keys `directory` or `directories`"
                 )
             }
-            InvalidLibraryBuildSpec::EmptyAlbumDirectory { album_handle } => {
-                write!(f, "album `{album_handle}` has an empty directory path")
+            InvalidLibraryBuildSpec::EmptyCollectionDirectory { collection_handle } => {
+                write!(
+                    f,
+                    "collection `{collection_handle}` has an empty `directory` path"
+                )
             }
-            InvalidLibraryBuildSpec::EmptyAlbumDirectories { album_handle } => {
-                write!(f, "album `{album_handle}` has an empty directories list")
+            InvalidLibraryBuildSpec::EmptyCollectionDirectories { collection_handle } => {
+                write!(
+                    f,
+                    "collection `{collection_handle}` has an empty `directories` list"
+                )
             }
-            InvalidLibraryBuildSpec::EmptyAlbumDirectoriesEntry {
-                album_handle,
+            InvalidLibraryBuildSpec::EmptyCollectionDirectoriesEntry {
+                collection_handle,
                 index,
             } => {
                 write!(
                     f,
-                    "album `{album_handle}` has an empty directories entry at index {index}"
+                    "collection `{collection_handle}` has an empty `directories` entry at index {index}"
                 )
             }
-            InvalidLibraryBuildSpec::UnknownAlbum { album_handle } => {
+            InvalidLibraryBuildSpec::UnknownCollectionHandle { collection_handle } => {
                 write!(
                     f,
-                    "rule references undeclared album handle `{album_handle}`"
+                    "rule references undeclared collection handle `{collection_handle}`"
                 )
             }
-            InvalidLibraryBuildSpec::EmptyAlbums => {
-                write!(f, "album rule must list at least one album handle")
-            }
-            InvalidLibraryBuildSpec::DuplicateAlbumRule { album_handle } => {
+            InvalidLibraryBuildSpec::EmptyCollectionRuleTargets => {
                 write!(
                     f,
-                    "album `{album_handle}` receives more than one album rule"
+                    "collection rule must list at least one collection handle in `collections`"
+                )
+            }
+            InvalidLibraryBuildSpec::DuplicateCollectionRule { collection_handle } => {
+                write!(
+                    f,
+                    "collection handle `{collection_handle}` is targeted more than once by `collection_rules`"
                 )
             }
             InvalidLibraryBuildSpec::DuplicateTrackRule {
-                album_handle,
+                collection_handle,
                 track_name,
             } => {
                 write!(
                     f,
-                    "track `{track_name}` in album `{album_handle}` has more than one rule"
+                    "track `{track_name}` in collection `{collection_handle}` has more than one rule"
                 )
             }
-            InvalidLibraryBuildSpec::EmptyTrackRules { album_handle } => {
+            InvalidLibraryBuildSpec::EmptyTrackRules { collection_handle } => {
                 write!(
                     f,
-                    "track rule group for `{album_handle}` has no nested rules"
+                    "track rule group for collection `{collection_handle}` has no nested `rules`"
                 )
             }
-            InvalidLibraryBuildSpec::TrackTargetNotExclusive { album_handle } => {
+            InvalidLibraryBuildSpec::TrackTargetNotExclusive { collection_handle } => {
                 write!(
                     f,
-                    "track rule for `{album_handle}` must set exactly one of track or tracks"
+                    "track rule for collection `{collection_handle}` must set exactly one of the TOML keys `track` or `tracks`"
                 )
             }
-            InvalidLibraryBuildSpec::EmptyTracks { album_handle } => {
+            InvalidLibraryBuildSpec::EmptyTracks { collection_handle } => {
                 write!(
                     f,
-                    "track rule for `{album_handle}` has an empty tracks list"
+                    "track rule for collection `{collection_handle}` has an empty `tracks` list"
                 )
             }
-            InvalidLibraryBuildSpec::TrackActionNotExclusive { album_handle } => {
+            InvalidLibraryBuildSpec::TrackActionNotExclusive { collection_handle } => {
                 write!(
                     f,
-                    "track rule for `{album_handle}` must set exactly one of exclude or bitrate"
+                    "track rule for collection `{collection_handle}` must set exactly one of the TOML keys `exclude` or `bitrate`"
                 )
             }
         }
@@ -403,27 +426,26 @@ struct RawLibraryBuildSpec {
     bitrate: Option<u32>,
     target_size: Option<String>,
     #[serde(default)]
-    files: Files,
+    files: FilesConfig,
     /// Ordered by first introduction of each handle so that
     /// the validated map preserves declaration order.
     #[serde(default)]
-    albums: IndexMap<String, RawAlbum>,
+    collections: IndexMap<String, RawCollectionDeclaration>,
     #[serde(default)]
-    album_rules: Vec<AlbumRule>,
+    collection_rules: Vec<CollectionRule>,
     #[serde(default)]
     track_rules: Vec<RawTrackRuleGroup>,
 }
 
-/// A TrackRuleGroup is an album, as well as a TrackRule:
-/// either one or multiple tracks, along with an action
-/// to perform on said track(s).
+/// A track-rule group references a collection handle and contains nested
+/// track rules for that collection.
 ///
 /// Raw, pre-validation, mid-deserialization struct.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawTrackRuleGroup {
-    #[serde(rename = "album")]
-    album_handle: String,
+    #[serde(rename = "collection")]
+    collection_handle: String,
     #[serde(default)]
     rules: Vec<RawTrackRule>,
 }
@@ -449,8 +471,8 @@ impl RawLibraryBuildSpec {
             bitrate,
             target_size,
             files,
-            albums,
-            album_rules,
+            collections,
+            collection_rules,
             track_rules,
         } = self;
 
@@ -461,26 +483,26 @@ impl RawLibraryBuildSpec {
             (None, None) => return Err(InvalidLibraryBuildSpec::MissingSizeMode.into()),
         };
 
-        // Validate each album declaration before checking rules that
+        // Validate each collection declaration before checking rules that
         // reference handles, so a malformed declaration is reported first.
-        let mut validated_albums = IndexMap::new();
-        for (album_handle, raw_album) in albums {
-            let album = raw_album.into_album(&album_handle)?;
-            validated_albums.insert(album_handle, album);
+        let mut validated_declarations = IndexMap::new();
+        for (collection_handle, raw_declaration) in collections {
+            let declaration = raw_declaration.into_declaration(&collection_handle)?;
+            validated_declarations.insert(collection_handle, declaration);
         }
 
         // Use a new BTreeSet to determine uniqueness
-        let mut rule_checked_album_handles = BTreeSet::new();
-        for rule in &album_rules {
-            if rule.album_handles.is_empty() {
-                return Err(InvalidLibraryBuildSpec::EmptyAlbums.into());
+        let mut rule_checked_collection_handles = BTreeSet::new();
+        for rule in &collection_rules {
+            if rule.collection_handles.is_empty() {
+                return Err(InvalidLibraryBuildSpec::EmptyCollectionRuleTargets.into());
             }
-            for album_handle in &rule.album_handles {
-                check_album_handle_defined(&validated_albums, album_handle)?;
+            for collection_handle in &rule.collection_handles {
+                check_collection_handle_defined(&validated_declarations, collection_handle)?;
                 // false means duplicate
-                if !rule_checked_album_handles.insert(album_handle.as_str()) {
-                    return Err(InvalidLibraryBuildSpec::DuplicateAlbumRule {
-                        album_handle: album_handle.clone(),
+                if !rule_checked_collection_handles.insert(collection_handle.as_str()) {
+                    return Err(InvalidLibraryBuildSpec::DuplicateCollectionRule {
+                        collection_handle: collection_handle.clone(),
                     }
                     .into());
                 }
@@ -491,26 +513,26 @@ impl RawLibraryBuildSpec {
         let mut rule_checked_tracks: BTreeSet<(String, String)> = BTreeSet::new();
         let mut validated_groups = Vec::with_capacity(track_rules.len());
         for group in track_rules {
-            check_album_handle_defined(&validated_albums, &group.album_handle)?;
+            check_collection_handle_defined(&validated_declarations, &group.collection_handle)?;
             if group.rules.is_empty() {
                 return Err(InvalidLibraryBuildSpec::EmptyTrackRules {
-                    album_handle: group.album_handle,
+                    collection_handle: group.collection_handle,
                 }
                 .into());
             }
             let RawTrackRuleGroup {
-                album_handle,
+                collection_handle,
                 rules,
             } = group;
             let mut validated_rules: Vec<TrackRule> = Vec::with_capacity(rules.len());
             for raw_rule in rules {
-                let rule: TrackRule = raw_rule.into_rule(&album_handle)?;
+                let rule: TrackRule = raw_rule.into_rule(&collection_handle)?;
                 for track_name in rule.target.track_names() {
-                    let key = (album_handle.clone(), track_name.to_owned());
+                    let key = (collection_handle.clone(), track_name.to_owned());
                     // false means duplicate
                     if !rule_checked_tracks.insert(key) {
                         return Err(InvalidLibraryBuildSpec::DuplicateTrackRule {
-                            album_handle: album_handle.clone(),
+                            collection_handle: collection_handle.clone(),
                             track_name: track_name.to_owned(),
                         }
                         .into());
@@ -519,7 +541,7 @@ impl RawLibraryBuildSpec {
                 validated_rules.push(rule);
             }
             validated_groups.push(TrackRuleGroup {
-                album_handle,
+                collection_handle,
                 rules: validated_rules,
             });
         }
@@ -529,22 +551,25 @@ impl RawLibraryBuildSpec {
             encoding_profile,
             size_mode,
             files,
-            albums: validated_albums,
-            album_rules,
+            collection_declarations: validated_declarations,
+            collection_rules,
             track_rules: validated_groups,
         })
     }
 }
 
-impl RawAlbum {
-    /// Collapses one raw album declaration into its validated form.
+impl RawCollectionDeclaration {
+    /// Collapses one raw collection declaration into its validated form.
     ///
     /// Metadata predicates are preserved exactly, including empty and
     /// whitespace-only values. The singular `directory` and plural
-    /// `directories` forms collapse into one ordered collection, and no
-    /// successful parse ever produces an empty collection.
-    fn into_album(self, album_handle: &str) -> Result<Album, LibraryBuildSpecError> {
-        let RawAlbum {
+    /// `directories` forms collapse into one ordered list, and no successful
+    /// parse ever produces an empty list.
+    fn into_declaration(
+        self,
+        collection_handle: &str,
+    ) -> Result<CollectionDeclaration, LibraryBuildSpecError> {
+        let RawCollectionDeclaration {
             name,
             artist,
             directory,
@@ -555,8 +580,8 @@ impl RawAlbum {
             name.is_some() || artist.is_some() || directory.is_some() || directories.is_some();
 
         if !has_selector {
-            return Err(InvalidLibraryBuildSpec::MissingAlbumSelector {
-                album_handle: album_handle.to_owned(),
+            return Err(InvalidLibraryBuildSpec::MissingCollectionSelector {
+                collection_handle: collection_handle.to_owned(),
             }
             .into());
         }
@@ -566,8 +591,8 @@ impl RawAlbum {
             (Some(directory), None) => {
                 // An empty decoded string is exactly an empty path
                 if directory.is_empty() {
-                    return Err(InvalidLibraryBuildSpec::EmptyAlbumDirectory {
-                        album_handle: album_handle.to_owned(),
+                    return Err(InvalidLibraryBuildSpec::EmptyCollectionDirectory {
+                        collection_handle: collection_handle.to_owned(),
                     }
                     .into());
                 }
@@ -575,14 +600,14 @@ impl RawAlbum {
             }
             (None, Some(directories)) => {
                 if directories.is_empty() {
-                    return Err(InvalidLibraryBuildSpec::EmptyAlbumDirectories {
-                        album_handle: album_handle.to_owned(),
+                    return Err(InvalidLibraryBuildSpec::EmptyCollectionDirectories {
+                        collection_handle: collection_handle.to_owned(),
                     }
                     .into());
                 }
                 if let Some(index) = directories.iter().position(String::is_empty) {
-                    return Err(InvalidLibraryBuildSpec::EmptyAlbumDirectoriesEntry {
-                        album_handle: album_handle.to_owned(),
+                    return Err(InvalidLibraryBuildSpec::EmptyCollectionDirectoriesEntry {
+                        collection_handle: collection_handle.to_owned(),
                         index,
                     }
                     .into());
@@ -590,14 +615,16 @@ impl RawAlbum {
                 Some(directories.into_iter().map(PathBuf::from).collect())
             }
             (Some(_), Some(_)) => {
-                return Err(InvalidLibraryBuildSpec::ConflictingAlbumPaths {
-                    album_handle: album_handle.to_owned(),
-                }
-                .into());
+                return Err(
+                    InvalidLibraryBuildSpec::ConflictingCollectionDirectoryForms {
+                        collection_handle: collection_handle.to_owned(),
+                    }
+                    .into(),
+                );
             }
         };
 
-        Ok(Album {
+        Ok(CollectionDeclaration {
             name,
             artist,
             directories,
@@ -616,7 +643,7 @@ impl TrackTarget {
 }
 
 impl RawTrackRule {
-    fn into_rule(self, album_handle: &str) -> Result<TrackRule, LibraryBuildSpecError> {
+    fn into_rule(self, collection_handle: &str) -> Result<TrackRule, LibraryBuildSpecError> {
         let RawTrackRule {
             track,
             tracks,
@@ -629,13 +656,13 @@ impl RawTrackRule {
             (None, Some(tracks)) if !tracks.is_empty() => TrackTarget::Tracks(tracks),
             (None, Some(_)) => {
                 return Err(InvalidLibraryBuildSpec::EmptyTracks {
-                    album_handle: album_handle.to_owned(),
+                    collection_handle: collection_handle.to_owned(),
                 }
                 .into());
             }
             _ => {
                 return Err(InvalidLibraryBuildSpec::TrackTargetNotExclusive {
-                    album_handle: album_handle.to_owned(),
+                    collection_handle: collection_handle.to_owned(),
                 }
                 .into());
             }
@@ -646,7 +673,7 @@ impl RawTrackRule {
             (None, Some(bitrate)) => TrackAction::Bitrate(bitrate),
             _ => {
                 return Err(InvalidLibraryBuildSpec::TrackActionNotExclusive {
-                    album_handle: album_handle.to_owned(),
+                    collection_handle: collection_handle.to_owned(),
                 }
                 .into());
             }
@@ -656,15 +683,15 @@ impl RawTrackRule {
     }
 }
 
-fn check_album_handle_defined(
-    albums: &IndexMap<String, Album>,
-    album_handle: &str,
+fn check_collection_handle_defined(
+    declarations: &IndexMap<String, CollectionDeclaration>,
+    collection_handle: &str,
 ) -> Result<(), LibraryBuildSpecError> {
-    if albums.contains_key(album_handle) {
+    if declarations.contains_key(collection_handle) {
         Ok(())
     } else {
-        Err(InvalidLibraryBuildSpec::UnknownAlbum {
-            album_handle: album_handle.to_owned(),
+        Err(InvalidLibraryBuildSpec::UnknownCollectionHandle {
+            collection_handle: collection_handle.to_owned(),
         }
         .into())
     }

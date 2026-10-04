@@ -15,11 +15,13 @@ pub(crate) use snapshots::SourceTreeSnapshot;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::album_scope::{AlbumScopePreparation, PreparedAlbumScopes, RedundancyWarning};
+use crate::collection_scope::{
+    CollectionScopePreparation, PreparedCollectionScopes, RedundancyWarning,
+};
 
-/// Builds a valid test spec with the supplied album declarations.
-pub(crate) fn parse_spec(album_declarations: &str) -> crate::config::LibraryBuildSpec {
-    let text = format!("codec = \"opus\"\nbitrate = 128\n{album_declarations}");
+/// Builds a valid test spec with the supplied collection declarations.
+pub(crate) fn parse_spec(collection_declarations: &str) -> crate::config::LibraryBuildSpec {
+    let text = format!("codec = \"opus\"\nbitrate = 128\n{collection_declarations}");
     crate::parse(&text).expect("test configuration must parse and validate")
 }
 
@@ -38,11 +40,11 @@ pub(crate) fn canonical(path: &Path) -> PathBuf {
 
 /// Returns the scopes and warnings, or panics if preparation failed.
 pub(crate) fn expect_prepared(
-    preparation: AlbumScopePreparation,
-) -> (PreparedAlbumScopes, Vec<RedundancyWarning>) {
+    preparation: CollectionScopePreparation,
+) -> (PreparedCollectionScopes, Vec<RedundancyWarning>) {
     match preparation {
-        AlbumScopePreparation::Prepared { scopes, warnings } => (scopes, warnings),
-        AlbumScopePreparation::Failed {
+        CollectionScopePreparation::Prepared { scopes, warnings } => (scopes, warnings),
+        CollectionScopePreparation::Failed {
             configured_failures,
             default_source_root_failure,
             warnings,

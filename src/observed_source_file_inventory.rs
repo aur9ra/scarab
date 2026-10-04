@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::album_scope::{AlbumScopePreparation, prepare_album_scopes};
+use crate::collection_scope::{CollectionScopePreparation, prepare_collection_scopes};
 use crate::config::LibraryBuildSpec;
 use crate::required_discovery::{RequiredDiscovery, discover_required_files};
 
@@ -53,10 +53,10 @@ pub fn build_observed_source_file_inventory(
     spec: &LibraryBuildSpec,
     source_root: &Path,
 ) -> Result<ObservedSourceFileInventorySuccess, ObservedSourceFileInventoryFailure> {
-    let preparation: AlbumScopePreparation = prepare_album_scopes(spec, source_root);
+    let preparation: CollectionScopePreparation = prepare_collection_scopes(spec, source_root);
     let (scopes, warnings) = match preparation {
-        AlbumScopePreparation::Prepared { scopes, warnings } => (scopes, warnings),
-        AlbumScopePreparation::Failed {
+        CollectionScopePreparation::Prepared { scopes, warnings } => (scopes, warnings),
+        CollectionScopePreparation::Failed {
             configured_failures,
             default_source_root_failure,
             warnings,
@@ -168,10 +168,10 @@ impl<'inventory> ObservedSourceFile<'inventory> {
 /// It appears in `covered_scopes` only after all required scans succeed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequiredScope {
-    /// One configured directory-selector group required by an album declaration.
+    /// One configured directory-selector group required by a collection declaration.
     ConfiguredDirectory {
-        /// Album declaration for which this scope is required.
-        album_handle: String,
+        /// Handle of the collection declaration that requires this scope.
+        collection_handle: String,
         /// Resolved path for this group.
         resolved_directory: PathBuf,
         /// Selector spellings in declaration order, including duplicates.
@@ -183,29 +183,29 @@ pub enum RequiredScope {
         original_source_root: PathBuf,
         /// Resolved path used for scanning.
         resolved_traversal_root: PathBuf,
-        /// Album declarations without directory selectors that require this
-        /// scope, in declaration order.
-        dependent_album_handles: Vec<String>,
+        /// Handles of collection declarations without directory selectors that require this scope,
+        /// in declaration order.
+        dependent_collection_handles: Vec<String>,
     },
 }
 
 fn required_scope_from_configured_directory(
-    scope: crate::album_scope::ConfiguredDirectoryScope,
+    scope: crate::collection_scope::ConfiguredDirectoryScope,
 ) -> RequiredScope {
     RequiredScope::ConfiguredDirectory {
-        album_handle: scope.album_handle,
+        collection_handle: scope.collection_handle,
         resolved_directory: scope.resolved_directory,
         contributing_selectors: scope.contributing_selectors,
     }
 }
 
 fn required_scope_from_default_source_root(
-    scope: crate::album_scope::DefaultSourceRootScope,
+    scope: crate::collection_scope::DefaultSourceRootScope,
 ) -> RequiredScope {
     RequiredScope::DefaultSourceRoot {
         original_source_root: scope.original_source_root,
         resolved_traversal_root: scope.resolved_traversal_root,
-        dependent_album_handles: scope.dependent_album_handles,
+        dependent_collection_handles: scope.dependent_collection_handles,
     }
 }
 
@@ -256,12 +256,12 @@ mod tests {
     use std::ffi::OsStr;
 
     fn configured_scope(
-        album_handle: &str,
+        collection_handle: &str,
         resolved_directory: &str,
         contributing_selectors: &[&str],
     ) -> RequiredScope {
         RequiredScope::ConfiguredDirectory {
-            album_handle: album_handle.to_owned(),
+            collection_handle: collection_handle.to_owned(),
             resolved_directory: PathBuf::from(resolved_directory),
             contributing_selectors: contributing_selectors.iter().map(PathBuf::from).collect(),
         }
@@ -315,7 +315,9 @@ mod tests {
         let mut handles: Vec<&str> = observed_file
             .reporting_scopes()
             .map(|scope| match scope {
-                RequiredScope::ConfiguredDirectory { album_handle, .. } => album_handle.as_str(),
+                RequiredScope::ConfiguredDirectory {
+                    collection_handle, ..
+                } => collection_handle.as_str(),
                 RequiredScope::DefaultSourceRoot { .. } => {
                     panic!("expected configured scope")
                 }
@@ -384,8 +386,8 @@ mod tests {
     #[test]
     fn required_scope_translation_preserves_owned_fields_and_spellings() {
         let configured = required_scope_from_configured_directory(
-            crate::album_scope::ConfiguredDirectoryScope {
-                album_handle: "deadwing".to_owned(),
+            crate::collection_scope::ConfiguredDirectoryScope {
+                collection_handle: "deadwing".to_owned(),
                 resolved_directory: PathBuf::from("/music/./Deadwing"),
                 contributing_selectors: vec![
                     PathBuf::from("Deadwing"),
@@ -396,11 +398,11 @@ mod tests {
         );
         match configured {
             RequiredScope::ConfiguredDirectory {
-                album_handle,
+                collection_handle,
                 resolved_directory,
                 contributing_selectors,
             } => {
-                assert_eq!(album_handle, "deadwing");
+                assert_eq!(collection_handle, "deadwing");
                 assert_eq!(
                     resolved_directory.as_os_str(),
                     OsStr::new("/music/./Deadwing"),
@@ -427,17 +429,18 @@ mod tests {
             other => panic!("configured translation must stay configured, got {other:?}"),
         }
 
-        let default =
-            required_scope_from_default_source_root(crate::album_scope::DefaultSourceRootScope {
+        let default = required_scope_from_default_source_root(
+            crate::collection_scope::DefaultSourceRootScope {
                 original_source_root: PathBuf::from("./source"),
                 resolved_traversal_root: PathBuf::from("/music/source/./"),
-                dependent_album_handles: vec!["z".to_owned(), "a".to_owned()],
-            });
+                dependent_collection_handles: vec!["z".to_owned(), "a".to_owned()],
+            },
+        );
         match default {
             RequiredScope::DefaultSourceRoot {
                 original_source_root,
                 resolved_traversal_root,
-                dependent_album_handles,
+                dependent_collection_handles,
             } => {
                 assert_eq!(
                     original_source_root.as_os_str(),
@@ -450,11 +453,11 @@ mod tests {
                     "resolved spelling must move unchanged"
                 );
                 assert_eq!(
-                    dependent_album_handles.len(),
+                    dependent_collection_handles.len(),
                     2,
-                    "length of dependent album handles must survive"
+                    "length of dependent collection handles must survive"
                 );
-                assert_eq!(dependent_album_handles, ["z", "a"]);
+                assert_eq!(dependent_collection_handles, ["z", "a"]);
             }
             other => panic!("default translation must stay default, got {other:?}"),
         }

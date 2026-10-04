@@ -4,15 +4,14 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! The `[files]` table: file selection via `album_art`, `include`,
-//! and `exclude`.
+//! The `[files]` table: file-handling options `album_art`, `include`, and `exclude`.
 
-use scarab::Files;
+use scarab::FilesConfig;
 
 use super::valid;
 
 #[test]
-fn parses_files_selection() {
+fn parses_file_handling_options() {
     let included = "codec = \"opus\"\nbitrate = 128\n[files]\nalbum_art = true\ninclude = [\"jpg\", \"png\"]\n";
     let config = valid(included);
     let files = config.files();
@@ -48,7 +47,7 @@ fn parses_files_include_and_exclude_together() {
 
 #[test]
 fn default_files_support_ordinary_field_mutation() {
-    let mut files = Files::default();
+    let mut files = FilesConfig::default();
     assert_eq!(files.album_art, None);
     assert_eq!(files.include, None);
     assert_eq!(files.exclude, None);
