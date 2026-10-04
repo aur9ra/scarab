@@ -40,6 +40,7 @@ mod collection_scope;
 mod config;
 mod directory_selector;
 mod discovery;
+mod metadata_selection;
 mod observed_source_file_inventory;
 mod probe;
 mod required_discovery;

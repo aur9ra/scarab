@@ -40,6 +40,8 @@ Work sharing during coverage cannot hide a failure in required coverage or erase
 
 Membership interprets an observed source file’s reporting-scope associations together with every exact metadata predicate when supplied. A collection’s configured directory scopes contribute a union of observed source files. Directory-only membership includes the files in that union recognized as source audio. An observed source file may belong to several configured collections. This is valid and does not itself create ambiguity or an ownership conflict. No first-wins or declaration-order rule assigns a file to a collection.
 
+Metadata-selector comparison is symmetric. Comparison removes all trailing U+0000s from each supplied value, NFC-normalizes both results, and compares them in full with case-sensitive equality. Whitespace, case, punctuation, embedded and leading U+0000, and compatibility-distinct Unicode are not removed. Matching under this rule does not redefine original or stored value identity. Comparison never rewrites either supplied representation.
+
 Global -> collection -> track overrides are explicit policy. Conflicting rules at the same precedence level block rather than being resolved by declaration order. Missing or ambiguous encoding requirements block encoding. Core logic does not prompt on stdin to resolve such requirements.
 
 Positive source-audio classification reserves the source-audio role for that pathname. Probe failure, membership non-match, or output exclusion does not reopen auxiliary-file handling. Auxiliary-file selection does not establish collection membership or expand collection scopes.
