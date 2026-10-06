@@ -4,10 +4,23 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! Reader-independent comparison of supplied metadata values.
+//! Reader-independent metadata-selector matching.
 //!
-//! This module compares only supplied values. An absent metadata field is not
-//! equivalent to a supplied empty value.
+//! Callers provide an observation of all three metadata families and an
+//! optional list of predicate values per family. This module compares them
+//! without accessing configuration, metadata readers, filesystem state,
+//! collection membership, or output policy.
+//!
+//! Predicate values combine by OR within each supplied family, and supplied
+//! families combine by AND. An omitted family imposes no constraint, and a
+//! supplied empty list never matches. Observation values in one family cannot
+//! satisfy predicate values in another family.
+
+// Production code does not use these items yet.
+// Review this allowance when adding callers.
+#![allow(dead_code)]
+
+use std::collections::BTreeSet;
 
 use unicode_normalization::UnicodeNormalization;
 
@@ -19,18 +32,164 @@ use unicode_normalization::UnicodeNormalization;
 /// symmetric and requires a whole-value match. Whitespace, punctuation
 /// (including semicolons), embedded and leading U+0000, and compatibility
 /// differences remain significant. Neither input is modified.
-// No production consumer exists yet. This comparison is staged for later
-// metadata-selection consumers.
-#[allow(dead_code)]
 pub(crate) fn metadata_values_match(left: &str, right: &str) -> bool {
     left.trim_end_matches('\0')
         .nfc()
         .eq(right.trim_end_matches('\0').nfc())
 }
 
+/// Represents a complete, successful observation of album names, album
+/// artists, and track artists.
+///
+/// The caller must supply complete results. This type cannot detect failed or
+/// incomplete extraction. Each family stores raw observation values under
+/// exact string equality: exact duplicates collapse, while observation values
+/// equivalent under [`metadata_values_match`] stay distinct. An empty set
+/// means no observation values are stored; an empty or NUL-only observation
+/// value, if present, is a member of the set. [`BTreeSet`] iteration order is
+/// an implementation detail, not a domain ordering contract.
+pub(crate) struct MetadataSelectorObservation {
+    album_names: BTreeSet<String>,
+    album_artists: BTreeSet<String>,
+    track_artists: BTreeSet<String>,
+}
+
+impl MetadataSelectorObservation {
+    /// Creates an observation from complete, successful results for all
+    /// families.
+    ///
+    /// The caller must not pass failed or incomplete extraction. The sets of
+    /// observation values and their raw strings are retained. Occurrence
+    /// counts and insertion order are already lost when the sets are formed.
+    pub(crate) fn new(
+        album_names: BTreeSet<String>,
+        album_artists: BTreeSet<String>,
+        track_artists: BTreeSet<String>,
+    ) -> Self {
+        Self {
+            album_names,
+            album_artists,
+            track_artists,
+        }
+    }
+}
+
+/// A complete compound predicate with an optional constraint for each of the
+/// three metadata families.
+///
+/// `None` imposes no constraint. `Some` matches when any predicate value
+/// matches an observation value in that family. Supplied families must all
+/// match, and `Some([])` is unsatisfiable. Predicate-value order and repetition
+/// are retained but do not affect evaluation.
+pub(crate) struct MetadataSelectorPredicate {
+    album_names: Option<Vec<String>>,
+    album_artists: Option<Vec<String>>,
+    track_artists: Option<Vec<String>>,
+}
+
+impl MetadataSelectorPredicate {
+    /// Creates a predicate while retaining each supplied representation.
+    ///
+    /// Predicate values, their order and repetitions, and the distinction
+    /// between `None` and `Some([])` are preserved. No validation or
+    /// normalization is done.
+    pub(crate) fn new(
+        album_names: Option<Vec<String>>,
+        album_artists: Option<Vec<String>>,
+        track_artists: Option<Vec<String>>,
+    ) -> Self {
+        Self {
+            album_names,
+            album_artists,
+            track_artists,
+        }
+    }
+}
+
+/// Returns whether any predicate value matches an observation value in this
+/// family. `None` imposes no constraint.
+fn family_matches(
+    observation_values: &BTreeSet<String>,
+    predicate_values: Option<&[String]>,
+) -> bool {
+    // HACK: this is some awful O(n^2) nonsense
+    // fix later. wrote method in 30 seconds
+    match predicate_values {
+        None => true,
+        Some(predicate_values) => predicate_values.iter().any(|predicate_value| {
+            observation_values
+                .iter()
+                .any(|observation_value| metadata_values_match(predicate_value, observation_value))
+        }),
+    }
+}
+
+/// Returns whether the compound predicate matches the complete observation.
+///
+/// Each supplied family matches when any predicate value matches any
+/// observation value under [`metadata_values_match`]. Omitted families impose
+/// no constraint. Neither argument is modified.
+pub(crate) fn observation_matches_predicate(
+    observation: &MetadataSelectorObservation,
+    predicate: &MetadataSelectorPredicate,
+) -> bool {
+    let album_names_match: bool =
+        family_matches(&observation.album_names, predicate.album_names.as_deref());
+    let album_artists_match: bool = family_matches(
+        &observation.album_artists,
+        predicate.album_artists.as_deref(),
+    );
+    let track_artists_match: bool = family_matches(
+        &observation.track_artists,
+        predicate.track_artists.as_deref(),
+    );
+
+    album_names_match && album_artists_match && track_artists_match
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn observation(
+        album_names: &[&str],
+        album_artists: &[&str],
+        track_artists: &[&str],
+    ) -> MetadataSelectorObservation {
+        MetadataSelectorObservation::new(
+            to_observation_values(album_names),
+            to_observation_values(album_artists),
+            to_observation_values(track_artists),
+        )
+    }
+
+    fn predicate(
+        album_names: Option<&[&str]>,
+        album_artists: Option<&[&str]>,
+        track_artists: Option<&[&str]>,
+    ) -> MetadataSelectorPredicate {
+        MetadataSelectorPredicate::new(
+            to_predicate_values(album_names),
+            to_predicate_values(album_artists),
+            to_predicate_values(track_artists),
+        )
+    }
+
+    fn to_observation_values(observation_values: &[&str]) -> BTreeSet<String> {
+        observation_values
+            .iter()
+            .map(|observation_value| (*observation_value).to_owned())
+            .collect()
+    }
+
+    fn to_predicate_values(predicate_values: Option<&[&str]>) -> Option<Vec<String>> {
+        predicate_values.map(|predicate_value_slice| {
+            predicate_value_slice
+                .iter()
+                .map(|predicate_value| (*predicate_value).to_owned())
+                .collect()
+        })
+    }
 
     #[test]
     fn identical_values_match() {
@@ -178,5 +337,382 @@ mod tests {
                 "comparison disagreed for {left:?} and {right:?}"
             );
         }
+    }
+
+    #[test]
+    fn omitted_families_impose_no_constraint() {
+        let all_omitted = predicate(None, None, None);
+        assert!(observation_matches_predicate(
+            &observation(&[], &[], &[]),
+            &all_omitted
+        ));
+        assert!(observation_matches_predicate(
+            &observation(&["Kind of Blue"], &["Miles Davis"], &["John Coltrane"]),
+            &all_omitted
+        ));
+
+        // The omitted families do not restrict their observation values.
+        let names_only = predicate(Some(&["Kind of Blue"]), None, None);
+        assert!(observation_matches_predicate(
+            &observation(&["Kind of Blue"], &["Anything"], &["Anything Else"]),
+            &names_only
+        ));
+    }
+
+    #[test]
+    fn later_predicate_values_and_observation_values_establish_a_match() {
+        let complete_observation = observation(&["Kind of Blue", "A Love Supreme"], &[], &[]);
+
+        // A later predicate value can match when the first does not.
+        assert!(observation_matches_predicate(
+            &complete_observation,
+            &predicate(Some(&["Bitches Brew", "A Love Supreme"]), None, None)
+        ));
+
+        // A single predicate value can match an observation value.
+        assert!(observation_matches_predicate(
+            &complete_observation,
+            &predicate(Some(&["A Love Supreme"]), None, None)
+        ));
+
+        // Matching must also reach an observation value after the first one
+        // visited in set iteration order.
+        assert!(observation_matches_predicate(
+            &complete_observation,
+            &predicate(Some(&["Kind of Blue"]), None, None)
+        ));
+
+        assert!(!observation_matches_predicate(
+            &complete_observation,
+            &predicate(Some(&["Bitches Brew", "Mingus Ah Um"]), None, None)
+        ));
+    }
+
+    #[test]
+    fn supplied_families_must_all_match() {
+        let complete_observation =
+            observation(&["Kind of Blue"], &["Miles Davis"], &["John Coltrane"]);
+
+        assert!(observation_matches_predicate(
+            &complete_observation,
+            &predicate(
+                Some(&["Kind of Blue"]),
+                Some(&["Miles Davis"]),
+                Some(&["John Coltrane"]),
+            )
+        ));
+
+        let failing_compound_predicates = [
+            predicate(
+                Some(&["Bitches Brew"]),
+                Some(&["Miles Davis"]),
+                Some(&["John Coltrane"]),
+            ),
+            predicate(
+                Some(&["Kind of Blue"]),
+                Some(&["Bill Evans"]),
+                Some(&["John Coltrane"]),
+            ),
+            predicate(
+                Some(&["Kind of Blue"]),
+                Some(&["Miles Davis"]),
+                Some(&["Cannonball Adderley"]),
+            ),
+        ];
+        for failing in &failing_compound_predicates {
+            assert!(!observation_matches_predicate(
+                &complete_observation,
+                failing
+            ));
+        }
+    }
+
+    #[test]
+    fn an_observation_value_only_matches_predicate_values_in_its_family() {
+        let complete_observation =
+            observation(&["Kind of Blue"], &["Miles Davis"], &["John Coltrane"]);
+        let own_predicate = predicate(
+            Some(&["Kind of Blue"]),
+            Some(&["Miles Davis"]),
+            Some(&["John Coltrane"]),
+        );
+        assert!(observation_matches_predicate(
+            &complete_observation,
+            &own_predicate
+        ));
+
+        // These observation values occur, but only in other families.
+        assert!(!observation_matches_predicate(
+            &complete_observation,
+            &predicate(Some(&["Miles Davis"]), None, None)
+        ));
+        assert!(!observation_matches_predicate(
+            &complete_observation,
+            &predicate(Some(&["John Coltrane"]), None, None)
+        ));
+        assert!(!observation_matches_predicate(
+            &complete_observation,
+            &predicate(None, Some(&["Kind of Blue"]), None)
+        ));
+        assert!(!observation_matches_predicate(
+            &complete_observation,
+            &predicate(None, Some(&["John Coltrane"]), None)
+        ));
+        assert!(!observation_matches_predicate(
+            &complete_observation,
+            &predicate(None, None, Some(&["Kind of Blue"]))
+        ));
+        assert!(!observation_matches_predicate(
+            &complete_observation,
+            &predicate(None, None, Some(&["Miles Davis"]))
+        ));
+    }
+
+    #[test]
+    fn supplied_empty_predicate_value_lists_are_unsatisfiable() {
+        let complete_observation =
+            observation(&["Kind of Blue"], &["Miles Davis"], &["John Coltrane"]);
+
+        // An empty list is a supplied constraint, unlike an omitted family.
+        assert!(observation_matches_predicate(
+            &complete_observation,
+            &predicate(None, None, None)
+        ));
+        assert!(!observation_matches_predicate(
+            &complete_observation,
+            &predicate(Some(&[]), None, None)
+        ));
+        assert!(!observation_matches_predicate(
+            &complete_observation,
+            &predicate(None, Some(&[]), None)
+        ));
+        assert!(!observation_matches_predicate(
+            &complete_observation,
+            &predicate(None, None, Some(&[]))
+        ));
+
+        assert!(!observation_matches_predicate(
+            &observation(&[], &[], &[]),
+            &predicate(Some(&[]), Some(&[]), Some(&[]))
+        ));
+    }
+
+    #[test]
+    fn present_empty_observation_value_is_distinct_from_empty_observation_family() {
+        let absent_observation = observation(&[], &[], &[]);
+
+        // An empty family has no observation value to match, even for empty or
+        // NUL-only predicate values.
+        assert!(!observation_matches_predicate(
+            &absent_observation,
+            &predicate(Some(&[""]), None, None)
+        ));
+        assert!(!observation_matches_predicate(
+            &absent_observation,
+            &predicate(None, Some(&[""]), None)
+        ));
+        assert!(!observation_matches_predicate(
+            &absent_observation,
+            &predicate(None, None, Some(&[""]))
+        ));
+        assert!(!observation_matches_predicate(
+            &absent_observation,
+            &predicate(Some(&["\0"]), None, None)
+        ));
+
+        // A present empty observation value matches an empty or NUL-only
+        // predicate value.
+        let present_empty_observation = observation(&[""], &[], &[]);
+        assert!(observation_matches_predicate(
+            &present_empty_observation,
+            &predicate(Some(&[""]), None, None)
+        ));
+        assert!(observation_matches_predicate(
+            &present_empty_observation,
+            &predicate(Some(&["\0"]), None, None)
+        ));
+
+        // A NUL-only observation value matches either predicate value and is
+        // not absence.
+        let nul_only_observation = observation(&["\0"], &[], &[]);
+        assert!(observation_matches_predicate(
+            &nul_only_observation,
+            &predicate(Some(&[""]), None, None)
+        ));
+        assert!(observation_matches_predicate(
+            &nul_only_observation,
+            &predicate(Some(&["\0"]), None, None)
+        ));
+    }
+
+    #[test]
+    fn exact_duplicates_collapse_while_raw_distinct_spellings_remain_stored() {
+        let composed = "Bj\u{00F6}rk".to_owned();
+        let decomposed = "Bjo\u{0308}rk".to_owned();
+        let nul_terminated = "Bj\u{00F6}rk\0".to_owned();
+
+        // These spellings match, but are not raw-equal.
+        assert!(metadata_values_match(&composed, &decomposed));
+        assert!(metadata_values_match(&composed, &nul_terminated));
+
+        let observation = MetadataSelectorObservation::new(
+            [
+                composed.clone(),
+                composed.clone(),
+                decomposed.clone(),
+                nul_terminated.clone(),
+            ]
+            .into_iter()
+            .collect(),
+            ["".to_owned(), "\0".to_owned()].into_iter().collect(),
+            BTreeSet::new(),
+        );
+
+        // The set removes only exact duplicates, not matching-equivalent
+        // observation values.
+        assert_eq!(observation.album_names.len(), 3);
+        assert!(observation.album_names.contains(&composed));
+        assert!(observation.album_names.contains(&decomposed));
+        assert!(observation.album_names.contains(&nul_terminated));
+
+        // Empty and NUL-only observation values remain distinct.
+        assert_eq!(observation.album_artists.len(), 2);
+        assert!(observation.album_artists.contains(""));
+        assert!(observation.album_artists.contains("\0"));
+        assert!(observation.track_artists.is_empty());
+    }
+
+    #[test]
+    fn predicate_value_order_and_repetition_do_not_affect_evaluation() {
+        let complete_observation = observation(&["Kind of Blue"], &[], &[]);
+
+        let forward = predicate(Some(&["Bitches Brew", "Kind of Blue"]), None, None);
+        let reversed = predicate(Some(&["Kind of Blue", "Bitches Brew"]), None, None);
+        let repeated = predicate(
+            Some(&[
+                "Bitches Brew",
+                "Kind of Blue",
+                "Kind of Blue",
+                "Bitches Brew",
+            ]),
+            None,
+            None,
+        );
+
+        assert!(observation_matches_predicate(
+            &complete_observation,
+            &forward
+        ));
+        assert!(observation_matches_predicate(
+            &complete_observation,
+            &reversed
+        ));
+        assert!(observation_matches_predicate(
+            &complete_observation,
+            &repeated
+        ));
+
+        let repeated_mismatch = predicate(Some(&["Mingus Ah Um", "Mingus Ah Um"]), None, None);
+        assert!(!observation_matches_predicate(
+            &complete_observation,
+            &repeated_mismatch
+        ));
+    }
+
+    #[test]
+    fn evaluation_uses_metadata_values_match() {
+        // NFC normalization and trailing-NUL removal also apply during matching.
+        let complete_observation = observation(&["Bjo\u{0308}rk\0"], &["e\u{0301}"], &[]);
+        assert!(observation_matches_predicate(
+            &complete_observation,
+            &predicate(Some(&["Bj\u{00F6}rk"]), Some(&["\u{00E9}"]), None)
+        ));
+
+        // Case, whitespace, embedded NUL, whole-value boundaries, and literal
+        // semicolons remain significant.
+        let sensitive_observation = observation(&["Artist A; Artist B"], &["The Wall"], &[]);
+        assert!(!observation_matches_predicate(
+            &sensitive_observation,
+            &predicate(Some(&["artist a; artist b"]), None, None)
+        ));
+        assert!(!observation_matches_predicate(
+            &sensitive_observation,
+            &predicate(Some(&["Artist A"]), None, None)
+        ));
+        assert!(!observation_matches_predicate(
+            &sensitive_observation,
+            &predicate(Some(&["Artist A;Artist B"]), None, None)
+        ));
+        assert!(!observation_matches_predicate(
+            &sensitive_observation,
+            &predicate(None, Some(&["The  Wall"]), None)
+        ));
+        assert!(!observation_matches_predicate(
+            &sensitive_observation,
+            &predicate(None, Some(&["The Wall "]), None)
+        ));
+        assert!(observation_matches_predicate(
+            &sensitive_observation,
+            &predicate(Some(&["Artist A; Artist B"]), Some(&["The Wall"]), None)
+        ));
+
+        let embedded_nul_observation = observation(&["A\0B"], &[], &[]);
+        assert!(!observation_matches_predicate(
+            &embedded_nul_observation,
+            &predicate(Some(&["AB"]), None, None)
+        ));
+        assert!(observation_matches_predicate(
+            &embedded_nul_observation,
+            &predicate(Some(&["A\0B"]), None, None)
+        ));
+    }
+
+    #[test]
+    fn construction_and_evaluation_preserve_supplied_representations() {
+        let album_names: BTreeSet<String> = ["Kind of Blue".to_owned(), "Bitches Brew".to_owned()]
+            .into_iter()
+            .collect();
+        let album_artists: BTreeSet<String> = ["Miles Davis".to_owned()].into_iter().collect();
+        let track_artists: BTreeSet<String> = BTreeSet::new();
+        // Decomposed Unicode and trailing NULs would change under forbidden
+        // NFC normalization or trailing-NUL removal.
+        let supplied_predicate_values = vec![
+            "Bjo\u{0308}rk".to_owned(),
+            "Track\0\0".to_owned(),
+            "Bitches Brew".to_owned(),
+            "Kind of Blue".to_owned(),
+            "Kind of Blue".to_owned(),
+        ];
+
+        let observation = MetadataSelectorObservation::new(
+            album_names.clone(),
+            album_artists.clone(),
+            track_artists.clone(),
+        );
+        let predicate = MetadataSelectorPredicate::new(
+            Some(supplied_predicate_values.clone()),
+            None,
+            Some(Vec::new()),
+        );
+
+        // Construction retains raw predicate values, their order and
+        // repetitions, and the distinction between omitted and supplied
+        // families.
+        assert_eq!(
+            predicate.album_names,
+            Some(supplied_predicate_values.clone())
+        );
+        assert_eq!(predicate.album_artists, None);
+        assert_eq!(predicate.track_artists, Some(Vec::new()));
+
+        let _ = observation_matches_predicate(&observation, &predicate);
+
+        // Evaluation leaves the observation and compound predicate unchanged.
+        assert_eq!(observation.album_names, album_names);
+        assert_eq!(observation.album_artists, album_artists);
+        assert_eq!(observation.track_artists, track_artists);
+        assert_eq!(predicate.album_names, Some(supplied_predicate_values));
+        assert_eq!(predicate.album_artists, None);
+        assert_eq!(predicate.track_artists, Some(Vec::new()));
     }
 }

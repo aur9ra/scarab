@@ -42,6 +42,10 @@ Membership interprets an observed source file’s reporting-scope associations t
 
 Metadata-selector comparison is symmetric. Comparison removes all trailing U+0000s from each supplied value, NFC-normalizes both results, and compares them in full with case-sensitive equality. Whitespace, case, punctuation, embedded and leading U+0000, and compatibility-distinct Unicode are not removed. Matching under this rule does not redefine original or stored value identity. Comparison never rewrites either supplied representation.
 
+`MetadataSelectorObservation`: Records complete, successful results for album names, album artists, and track artists. Each family (stored as `BTreeSet`s) is a set of raw strings under exact equality. Exact duplicates collapse, but comparison-equivalent strings remain distinct. An empty family means no value was observed, not an empty or NUL-only value. The type cannot enforce completeness. Extraction failure, incomplete extraction, and unavailable metadata remain outside the observation.
+
+Omitted predicate families impose no constraints. Supplied alternatives combine by OR under metadata-selector comparison, and supplied families combine by AND. A supplied family with no alternatives is unsatisfiable. Each family is evaluated independently, so values in one family cannot satisfy another family’s constraint. Alternative order and repetition do not affect evaluation.
+
 Global -> collection -> track overrides are explicit policy. Conflicting rules at the same precedence level block rather than being resolved by declaration order. Missing or ambiguous encoding requirements block encoding. Core logic does not prompt on stdin to resolve such requirements.
 
 Positive source-audio classification reserves the source-audio role for that pathname. Probe failure, membership non-match, or output exclusion does not reopen auxiliary-file handling. Auxiliary-file selection does not establish collection membership or expand collection scopes.
