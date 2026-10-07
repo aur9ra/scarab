@@ -451,7 +451,7 @@ mod tests {
     fn one_dependent_collection_prepares_the_default_source_root() {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
-        let spec = parse_spec("[collections.tool]\nname = \"Tool\"\n");
+        let spec = parse_spec("[collections.tool]\nalbum_name = \"Tool\"\n");
 
         let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
 
@@ -474,10 +474,10 @@ mod tests {
         let source = create_source(&sandbox);
         fs::create_dir(source.join("Lateralus")).expect("create album directory");
         let spec = parse_spec(
-            "[collections.z]\nname = \"Z\"\n\
-             [collections.a]\nname = \"A\"\n\
+            "[collections.z]\nalbum_name = \"Z\"\n\
+             [collections.a]\nalbum_artist = \"A\"\n\
              [collections.m]\ndirectory = \"Lateralus\"\n\
-             [collections.q]\nartist = \"Q\"\n",
+             [collections.q]\ntrack_artist = \"Q\"\n",
         );
 
         let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
@@ -497,7 +497,7 @@ mod tests {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let spelling = source.join(".");
-        let spec = parse_spec("[collections.tool]\nname = \"Tool\"\n");
+        let spec = parse_spec("[collections.tool]\nalbum_name = \"Tool\"\n");
 
         let (scopes, _) = expect_prepared(prepare_collection_scopes(&spec, &spelling));
 
@@ -518,7 +518,7 @@ mod tests {
 
     #[test]
     fn exactly_empty_default_source_root_is_rejected() {
-        let spec = parse_spec("[collections.tool]\nname = \"Tool\"\n");
+        let spec = parse_spec("[collections.tool]\nalbum_name = \"Tool\"\n");
 
         let (configured_failures, default_failure, warnings) =
             expect_failed(prepare_collection_scopes(&spec, Path::new("")));
@@ -536,7 +536,7 @@ mod tests {
     }
     #[test]
     fn whitespace_only_default_source_root_is_not_empty_input() {
-        let spec = parse_spec("[collections.tool]\nname = \"Tool\"\n");
+        let spec = parse_spec("[collections.tool]\nalbum_name = \"Tool\"\n");
 
         // Resolution depends on the test's working directory; only check that
         // whitespace is not classified as empty.
@@ -573,7 +573,7 @@ mod tests {
     fn missing_default_source_root_reports_native_resolution_failure() {
         let sandbox = TempSandbox::new();
         let missing_root = sandbox.path().join("missing-root");
-        let spec = parse_spec("[collections.tool]\nname = \"Tool\"\n");
+        let spec = parse_spec("[collections.tool]\nalbum_name = \"Tool\"\n");
 
         let (configured_failures, default_failure, warnings) =
             expect_failed(prepare_collection_scopes(&spec, &missing_root));
@@ -600,7 +600,7 @@ mod tests {
         let sandbox = TempSandbox::new();
         let file = sandbox.path().join("source-file");
         fs::write(&file, b"not a directory").expect("write file");
-        let spec = parse_spec("[collections.tool]\nname = \"Tool\"\n");
+        let spec = parse_spec("[collections.tool]\nalbum_name = \"Tool\"\n");
 
         let (_, default_failure, _) = expect_failed(prepare_collection_scopes(&spec, &file));
 
@@ -766,7 +766,7 @@ mod tests {
         let source = create_source(&sandbox);
         let spec = parse_spec(
             "[collections.one]\ndirectory = \".\"\n\
-             [collections.two]\nname = \"Two\"\n",
+             [collections.two]\nalbum_name = \"Two\"\n",
         );
 
         let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
@@ -879,7 +879,7 @@ mod tests {
         let missing_album = sandbox.path().join("missing-album");
         let spec = parse_spec(&format!(
             "[collections.one]\ndirectory = {}\n\
-             [collections.two]\nname = \"Two\"\n",
+             [collections.two]\nalbum_name = \"Two\"\n",
             toml_string(&missing_album)
         ));
 
@@ -914,7 +914,7 @@ mod tests {
              [collections.one-again]\ndirectory = \"album-one\"\n\
              [collections.two]\ndirectory = \"album-two\"\n\
              [collections.gone]\ndirectory = \"no-such-album\"\n\
-             [collections.dependent]\nname = \"Dependent\"\n",
+             [collections.dependent]\nalbum_name = \"Dependent\"\n",
         );
 
         let snapshot = SourceTreeSnapshot::capture(&source);

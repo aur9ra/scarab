@@ -715,4 +715,203 @@ mod tests {
         assert_eq!(predicate.album_artists, None);
         assert_eq!(predicate.track_artists, Some(Vec::new()));
     }
+
+    fn parsed_declaration(body: &str) -> crate::config::CollectionDeclaration {
+        let text = format!("codec = \"opus\"\nbitrate = 128\n[collections.item]\n{body}");
+        let spec = crate::parse(&text).expect("test configuration must parse and validate");
+        spec.collection_declaration("item")
+            .expect("item must be declared")
+            .clone()
+    }
+
+    #[test]
+    fn declaration_translation_preserves_omission_as_unconstrained() {
+        let declaration = parsed_declaration("directory = \"Album\"\n");
+        let predicate = declaration.metadata_selector_predicate();
+
+        assert_eq!(predicate.album_names, None);
+        assert_eq!(predicate.album_artists, None);
+        assert_eq!(predicate.track_artists, None);
+
+        let probe = observation(&["Kind of Blue"], &["Miles Davis"], &["Coltrane"]);
+        assert!(observation_matches_predicate(&probe, &predicate));
+        let empty = observation(&[], &[], &[]);
+        assert!(observation_matches_predicate(&empty, &predicate));
+    }
+
+    #[test]
+    fn declaration_translation_maps_each_family_independently() {
+        let names_only = parsed_declaration("album_name = \"Kind of Blue\"\n");
+        let predicate = names_only.metadata_selector_predicate();
+        assert_eq!(predicate.album_names, Some(vec!["Kind of Blue".to_owned()]));
+        assert_eq!(predicate.album_artists, None);
+        assert_eq!(predicate.track_artists, None);
+
+        let artists_only = parsed_declaration("album_artists = [\"Miles Davis\", \"Coltrane\"]\n");
+        let predicate = artists_only.metadata_selector_predicate();
+        assert_eq!(predicate.album_names, None);
+        assert_eq!(
+            predicate.album_artists,
+            Some(vec!["Miles Davis".to_owned(), "Coltrane".to_owned()])
+        );
+        assert_eq!(predicate.track_artists, None);
+
+        let track_only = parsed_declaration("track_artist = \"Coltrane\"\n");
+        let predicate = track_only.metadata_selector_predicate();
+        assert_eq!(predicate.album_names, None);
+        assert_eq!(predicate.album_artists, None);
+        assert_eq!(predicate.track_artists, Some(vec!["Coltrane".to_owned()]));
+
+        let combined = parsed_declaration(
+            "album_name = \"Kind of Blue\"\nalbum_artist = \"Miles Davis\"\ntrack_artists = [\"Coltrane\", \"Evans\"]\n",
+        );
+        let predicate = combined.metadata_selector_predicate();
+        assert_eq!(predicate.album_names, Some(vec!["Kind of Blue".to_owned()]));
+        assert_eq!(
+            predicate.album_artists,
+            Some(vec!["Miles Davis".to_owned()])
+        );
+        assert_eq!(
+            predicate.track_artists,
+            Some(vec!["Coltrane".to_owned(), "Evans".to_owned()])
+        );
+    }
+
+    #[test]
+    fn declaration_translation_preserves_order_repetition_and_empty_strings() {
+        let declaration = parsed_declaration(
+            "album_names = [\"\", \"B\", \"A\", \"B\", \"   \"]\nalbum_artists = [\"X\", \"X\"]\ntrack_artist = \"\"\n",
+        );
+        let predicate = declaration.metadata_selector_predicate();
+
+        assert_eq!(
+            predicate.album_names,
+            Some(vec![
+                "".to_owned(),
+                "B".to_owned(),
+                "A".to_owned(),
+                "B".to_owned(),
+                "   ".to_owned(),
+            ])
+        );
+        assert_eq!(
+            predicate.album_artists,
+            Some(vec!["X".to_owned(), "X".to_owned()])
+        );
+        assert_eq!(predicate.track_artists, Some(vec!["".to_owned()]));
+    }
+
+    #[test]
+    fn declaration_translation_preserves_matching_sensitive_spellings() {
+        // Translation must preserve decomposed Unicode and trailing NULs.
+        // The test covers all three selector families.
+        let declaration = parsed_declaration(
+            "album_names = [\"Bjo\\u0308rk\", \"Track\\u0000\\u0000\"]\nalbum_artists = [\"e\\u0301\"]\ntrack_artists = [\"\\u1100\\u1161\\u0000\"]\n",
+        );
+        let predicate = declaration.metadata_selector_predicate();
+
+        assert_eq!(
+            predicate.album_names,
+            Some(vec!["Bjo\u{0308}rk".to_owned(), "Track\0\0".to_owned()])
+        );
+        assert_eq!(predicate.album_artists, Some(vec!["e\u{0301}".to_owned()]));
+        assert_eq!(
+            predicate.track_artists,
+            Some(vec!["\u{1100}\u{1161}\0".to_owned()])
+        );
+        assert_ne!(
+            predicate.album_names,
+            Some(vec!["Bj\u{00F6}rk".to_owned(), "Track".to_owned()]),
+            "translation must not normalize or trim"
+        );
+    }
+
+    #[test]
+    fn declaration_translation_keeps_detached_empty_lists_supplied() {
+        let families: [fn(crate::config::CollectionDeclaration) -> bool; 3] = [
+            |declaration| declaration.metadata_selector_predicate().album_names == Some(Vec::new()),
+            |declaration| {
+                declaration.metadata_selector_predicate().album_artists == Some(Vec::new())
+            },
+            |declaration| {
+                declaration.metadata_selector_predicate().track_artists == Some(Vec::new())
+            },
+        ];
+        let empty_vectors = [
+            crate::config::CollectionDeclaration {
+                album_names: Some(Vec::new()),
+                album_artists: None,
+                track_artists: None,
+                directories: None,
+            },
+            crate::config::CollectionDeclaration {
+                album_names: None,
+                album_artists: Some(Vec::new()),
+                track_artists: None,
+                directories: None,
+            },
+            crate::config::CollectionDeclaration {
+                album_names: None,
+                album_artists: None,
+                track_artists: Some(Vec::new()),
+                directories: None,
+            },
+        ];
+        for (declaration, check) in empty_vectors.into_iter().zip(families) {
+            assert!(
+                check(declaration),
+                "detached empty list must stay supplied-empty"
+            );
+        }
+
+        let probe = observation(&["Kind of Blue"], &["Miles Davis"], &["Coltrane"]);
+        for declaration in [
+            crate::config::CollectionDeclaration {
+                album_names: Some(Vec::new()),
+                album_artists: None,
+                track_artists: None,
+                directories: None,
+            },
+            crate::config::CollectionDeclaration {
+                album_names: None,
+                album_artists: Some(Vec::new()),
+                track_artists: None,
+                directories: None,
+            },
+            crate::config::CollectionDeclaration {
+                album_names: None,
+                album_artists: None,
+                track_artists: Some(Vec::new()),
+                directories: None,
+            },
+        ] {
+            let predicate = declaration.metadata_selector_predicate();
+            assert!(
+                !observation_matches_predicate(&probe, &predicate),
+                "supplied-empty family must stay unsatisfiable"
+            );
+        }
+    }
+
+    #[test]
+    fn declaration_translation_ignores_directories_and_leaves_declaration_unchanged() {
+        let without_directories = parsed_declaration("album_name = \"Kind of Blue\"\n");
+        let with_directories = parsed_declaration(
+            "album_name = \"Kind of Blue\"\ndirectories = [\"Disc 1\", \"Disc 2\"]\n",
+        );
+        let singular_directory =
+            parsed_declaration("album_name = \"Kind of Blue\"\ndirectory = \"Disc 1\"\n");
+
+        let baseline = without_directories.metadata_selector_predicate();
+        for declaration in [&with_directories, &singular_directory] {
+            let predicate = declaration.metadata_selector_predicate();
+            assert_eq!(predicate.album_names, baseline.album_names);
+            assert_eq!(predicate.album_artists, baseline.album_artists);
+            assert_eq!(predicate.track_artists, baseline.track_artists);
+        }
+
+        let before = with_directories.clone();
+        let _ = with_directories.metadata_selector_predicate();
+        assert_eq!(with_directories, before);
+    }
 }

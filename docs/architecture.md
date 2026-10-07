@@ -22,7 +22,7 @@ A failed or incomplete observation does not by itself establish a negative resul
 
 `LibraryBuildSpec` is a validated declarative specification, not mutable execution state. Nested values detached from a validated `LibraryBuildSpec` do not carry its aggregate validation guarantees independently.
 
-Collection handles are exact configuration identities and rule targets, not album metadata identities such as name or artist. Each supplied exact metadata value is distinct from an omitted metadata predicate, including an explicitly supplied empty or whitespace-only value.
+Collection handles are exact configuration identities and rule targets, not metadata values such as album names, album artists, or track artists. Each metadata family accepts either its singular or plural TOML key, but not both. Singular values become one-element lists. A supplied exact metadata value is distinct from an omitted predicate, even when it is empty or whitespace-only. Configured plural metadata lists cannot be empty. A detached predicate may contain an empty list, which makes that family unsatisfiable.
 
 Configuration ordering does not establish policy precedence.
 

@@ -26,7 +26,7 @@ fn parses_collection_rule_with_one_collection() {
 
 #[test]
 fn collection_rule_preserves_listed_handles() {
-    let text = "codec = \"opus\"\nbitrate = 128\n[collections.aenima]\nname = \"Ænima\"\nartist = \"Tool\"\n[collections.lateralus]\nname = \"Lateralus\"\nartist = \"Tool\"\n[[collection_rules]]\ncollections = [\"aenima\", \"lateralus\"]\nbitrate = 96\n";
+    let text = "codec = \"opus\"\nbitrate = 128\n[collections.aenima]\nalbum_name = \"Ænima\"\nalbum_artist = \"Tool\"\n[collections.lateralus]\nalbum_name = \"Lateralus\"\nalbum_artist = \"Tool\"\n[[collection_rules]]\ncollections = [\"aenima\", \"lateralus\"]\nbitrate = 96\n";
 
     let config = valid(text);
     let rules = config.collection_rules();
@@ -72,7 +72,7 @@ fn collection_rule_rejects_duplicate_handles_across_rules() {
         );
     }
 
-    let partial_overlap = "codec = \"opus\"\nbitrate = 128\n[collections.aenima]\nname = \"Ænima\"\nartist = \"Tool\"\n[collections.lateralus]\nname = \"Lateralus\"\nartist = \"Tool\"\n[[collection_rules]]\ncollections = [\"aenima\", \"lateralus\"]\nbitrate = 96\n[[collection_rules]]\ncollections = [\"lateralus\"]\nbitrate = 64\n";
+    let partial_overlap = "codec = \"opus\"\nbitrate = 128\n[collections.aenima]\nalbum_name = \"Ænima\"\nalbum_artist = \"Tool\"\n[collections.lateralus]\nalbum_name = \"Lateralus\"\nalbum_artist = \"Tool\"\n[[collection_rules]]\ncollections = [\"aenima\", \"lateralus\"]\nbitrate = 96\n[[collection_rules]]\ncollections = [\"lateralus\"]\nbitrate = 64\n";
     assert_eq!(
         invalid(partial_overlap),
         InvalidLibraryBuildSpec::DuplicateCollectionRule {
@@ -114,8 +114,9 @@ fn collection_rule_can_reference_directory_only_collection() {
         .collection_declaration("fs_only")
         .expect("fs_only must be declared");
 
-    assert_eq!(declaration.name, None);
-    assert_eq!(declaration.artist, None);
+    assert_eq!(declaration.album_names, None);
+    assert_eq!(declaration.album_artists, None);
+    assert_eq!(declaration.track_artists, None);
     assert_eq!(
         declaration.directories,
         Some(vec![PathBuf::from("Undertow")])

@@ -136,9 +136,9 @@ fn shared_default_single_scope_with_declaration_ordered_dependents() {
     let source = create_source(&sandbox);
     fs::write(source.join("sentinel.txt"), b"sentinel").expect("write sentinel");
     let spec = parse_spec(
-        "[collections.z]\nname = \"Z\"\n\
-         [collections.a]\nname = \"A\"\n\
-         [collections.q]\nartist = \"Q\"\n",
+        "[collections.z]\nalbum_name = \"Z\"\n\
+         [collections.a]\nalbum_artist = \"A\"\n\
+         [collections.q]\ntrack_artist = \"Q\"\n",
     );
 
     let snapshot = SourceTreeSnapshot::capture(&source);
@@ -375,7 +375,7 @@ fn configured_and_default_equal_roots_share_observed_file_with_two_scopes() {
     fs::write(source.join("track.dat"), b"track").expect("write track");
     let spec = parse_spec(
         "[collections.one]\ndirectory = \".\"\n\
-         [collections.two]\nname = \"Two\"\n",
+         [collections.two]\nalbum_name = \"Two\"\n",
     );
 
     let snapshot = SourceTreeSnapshot::capture(&source);
@@ -421,7 +421,7 @@ fn file_content_and_configuration_blindness() {
     // Inventory ignores file policy, metadata predicates, and output rules.
     let spec = parse_spec(
         "[files]\ninclude = [\"flac\"]\nexclude = [\"txt\", \"jpg\"]\n\
-         [collections.tool]\ndirectory = \"Album\"\nname = \"Tool\"\nartist = \"Tool\"\n\
+         [collections.tool]\ndirectory = \"Album\"\nalbum_name = \"Tool\"\nalbum_artist = \"Tool\"\n\
          [[collection_rules]]\ncollections = [\"tool\"]\nbitrate = 64\n\
          [[track_rules]]\ncollection = \"tool\"\nrules = [{ track = \"invalid.flac\", exclude = true }]\n",
     );
@@ -561,7 +561,7 @@ fn preparation_failure_retains_configured_default_and_warning_without_inventory(
         "[collections.good]\ndirectories = [{}, {}]\n\
          [collections.bad-one]\ndirectory = {}\n\
          [collections.bad-two]\ndirectory = {}\n\
-         [collections.dependent]\nname = \"Dependent\"\n",
+         [collections.dependent]\nalbum_name = \"Dependent\"\n",
         toml_string(&existing),
         toml_string(&existing),
         toml_string(&missing_one),

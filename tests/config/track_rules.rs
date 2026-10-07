@@ -45,7 +45,7 @@ fn parses_track_rules() {
 
 #[test]
 fn same_track_name_is_allowed_in_different_collections() {
-    let text = "codec = \"opus\"\nbitrate = 128\n[collections.aenima]\nname = \"Ænima\"\nartist = \"Tool\"\n[collections.salival]\nname = \"Salival\"\nartist = \"Tool\"\n[[track_rules]]\ncollection = \"aenima\"\nrules = [{ track = \"Pushit\", bitrate = 64 }]\n[[track_rules]]\ncollection = \"salival\"\nrules = [{ track = \"Pushit\", bitrate = 64 }]\n";
+    let text = "codec = \"opus\"\nbitrate = 128\n[collections.aenima]\nalbum_name = \"Ænima\"\nalbum_artist = \"Tool\"\n[collections.salival]\nalbum_name = \"Salival\"\nalbum_artist = \"Tool\"\n[[track_rules]]\ncollection = \"aenima\"\nrules = [{ track = \"Pushit\", bitrate = 64 }]\n[[track_rules]]\ncollection = \"salival\"\nrules = [{ track = \"Pushit\", bitrate = 64 }]\n";
     assert_eq!(valid(text).track_rules().len(), 2);
 }
 

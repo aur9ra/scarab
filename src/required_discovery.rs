@@ -243,9 +243,9 @@ mod tests {
         let source = create_source(&sandbox);
         fs::write(source.join("sentinel.txt"), b"sentinel").expect("write sentinel");
         let spec = parse_spec(
-            "[collections.z]\nname = \"Z\"\n\
-             [collections.a]\nname = \"A\"\n\
-             [collections.q]\nartist = \"Q\"\n",
+            "[collections.z]\nalbum_name = \"Z\"\n\
+             [collections.a]\nalbum_artist = \"A\"\n\
+             [collections.q]\ntrack_artist = \"Q\"\n",
         );
 
         let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
@@ -274,7 +274,7 @@ mod tests {
         let spec = parse_spec(
             "[collections.one]\ndirectory = \"Fear of a Blank Planet\"\n\
              [collections.two]\ndirectory = \"empty-album\"\n\
-             [collections.three]\nname = \"Three\"\n",
+             [collections.three]\nalbum_name = \"Three\"\n",
         );
 
         let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
@@ -341,7 +341,7 @@ mod tests {
         fs::write(deadwing.join("Lazarus.flac"), b"track").expect("write track");
         let spec = parse_spec(
             "[collections.deadwing]\ndirectory = \"Deadwing\"\n\
-             [collections.in-absentia]\nname = \"In Absentia\"\n",
+             [collections.in-absentia]\nalbum_name = \"In Absentia\"\n",
         );
 
         let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
@@ -435,7 +435,7 @@ mod tests {
         fs::write(source.join("Blackest Eyes.flac"), b"track").expect("write track");
         let spec = parse_spec(
             "[collections.fear-of-a-blank-planet]\ndirectory = \".\"\n\
-             [collections.in-absentia]\nname = \"In Absentia\"\n",
+             [collections.in-absentia]\nalbum_name = \"In Absentia\"\n",
         );
 
         let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
@@ -561,7 +561,7 @@ mod tests {
         let spec = parse_spec(
             "[collections.fear-of-a-blank-planet]\ndirectory = \"Fear of a Blank Planet\"\n\
              [collections.deadwing]\ndirectory = \"Deadwing\"\n\
-             [collections.dependent]\nname = \"Dependent\"\n",
+             [collections.dependent]\nalbum_name = \"Dependent\"\n",
         );
 
         let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));

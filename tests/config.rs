@@ -34,8 +34,7 @@ use scarab::{InvalidLibraryBuildSpec, LibraryBuildSpec, LibraryBuildSpecError, p
 
 /// Valid top-level keys followed by one collection declaration. Top-level keys must
 /// precede tables in TOML, so tests append only tables to this prefix.
-const PREFIX: &str =
-    "codec = \"opus\"\nbitrate = 128\n[collections.aenima]\nname = \"Ænima\"\nartist = \"Tool\"\n";
+const PREFIX: &str = "codec = \"opus\"\nbitrate = 128\n[collections.aenima]\nalbum_name = \"Ænima\"\nalbum_artist = \"Tool\"\n";
 
 fn prefixed(body: &str) -> String {
     format!("{PREFIX}{body}")

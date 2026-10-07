@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::path::PathBuf;
 
+use crate::metadata_selection::MetadataSelectorPredicate;
 use indexmap::IndexMap;
 use serde::Deserialize;
 
@@ -74,8 +75,22 @@ pub struct FilesConfig {
 
 /// Membership criteria for one declared collection.
 ///
-/// `name` and `artist` are optional, independent metadata selectors. Supplied
-/// values are preserved exactly.
+/// Metadata selectors cover album names, album artists, and track artists.
+/// Each family accepts either its singular TOML key (`album_name`,
+/// `album_artist`, or `track_artist`) xor its plural key (`album_names`,
+/// `album_artists`, or `track_artists`). A configured plural list must be
+/// nonempty. If neither key in a family is set, that family is omitted and
+/// imposes no constraint.
+///
+/// Configuration processing preserves the original selector strings. It does
+/// not trim, normalize, split, filter, deduplicate, or case-fold them. Plural
+/// alternative order is preserved. Alternatives combine by OR within a family.
+/// Supplied families combine by AND. Matching removes all trailing U+0000s,
+/// applies NFC normalization, then compares whole values with case-sensitive
+/// equality. It does not change stored strings.
+///
+/// Validation checks selector shape, not whether metadata matches. Every
+/// collection declaration must supply at least one metadata or directory selector.
 ///
 /// `directories` stores the directory selector or selectors from the
 /// `directory` or `directories` configuration fields. `None` means no directory
@@ -83,31 +98,56 @@ pub struct FilesConfig {
 /// shared default source root. Configured selector values are preserved exactly,
 /// including order, duplicates, and relative/absolute spelling.
 ///
-/// This declaration contains criteria, not evaluated members. Aggregate
-/// validation guarantees belong to [`LibraryBuildSpec`], not to detached or
-/// modified declarations.
+/// This declaration contains criteria, not evaluated members. Only
+/// [`LibraryBuildSpec`] carries aggregate validation guarantees. Detached or
+/// modified declarations do not. A detached declaration may contain an empty
+/// metadata list, which remains supplied and unsatisfiable when translated,
+/// although parsing rejects empty plural arrays.
 ///
 /// Non-exhaustive to allow future fields. Downstream crates can access its
 /// public fields but cannot use struct literals or exhaustive patterns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct CollectionDeclaration {
-    pub name: Option<String>,
-    pub artist: Option<String>,
+    pub album_names: Option<Vec<String>>,
+    pub album_artists: Option<Vec<String>>,
+    pub track_artists: Option<Vec<String>>,
     pub directories: Option<Vec<PathBuf>>,
+}
+
+impl CollectionDeclaration {
+    /// Builds a compound predicate from this declaration's metadata selectors.
+    ///
+    /// The translation preserves `None`, empty lists, string contents, list
+    /// order, and repetitions. It does not validate or normalize values,
+    /// construct observations, evaluate matches, or access the filesystem.
+    /// Directory selectors do not affect the result.
+    // Staged until production metadata-selector integration.
+    #[allow(dead_code)]
+    pub(crate) fn metadata_selector_predicate(&self) -> MetadataSelectorPredicate {
+        MetadataSelectorPredicate::new(
+            self.album_names.clone(),
+            self.album_artists.clone(),
+            self.track_artists.clone(),
+        )
+    }
 }
 
 /// Raw, pre-validation deserialization target for one `[collections.<handle>]`
 /// table.
 ///
-/// Keeps the separate singular `directory` and plural `directories` fields
-/// separate until validation collapses them into
-/// [`CollectionDeclaration::directories`].
+/// Retains singular and plural TOML forms separately until validation rejects
+/// conflicts and converts them to canonical fields in
+/// [`CollectionDeclaration`].
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawCollectionDeclaration {
-    name: Option<String>,
-    artist: Option<String>,
+    album_name: Option<String>,
+    album_names: Option<Vec<String>>,
+    album_artist: Option<String>,
+    album_artists: Option<Vec<String>>,
+    track_artist: Option<String>,
+    track_artists: Option<Vec<String>>,
     directory: Option<String>,
     directories: Option<Vec<String>>,
 }
@@ -282,9 +322,20 @@ pub enum InvalidLibraryBuildSpec {
     MissingSizeMode,
     /// Both `bitrate` and `target_size` were configured.
     ConflictingSizeMode,
-    /// A `[collections.<handle>]` table configured none of `name`, `artist`,
-    /// `directory`, or `directories`.
+    /// A collection table has no metadata or directory selector.
     MissingCollectionSelector { collection_handle: String },
+    /// Both singular `album_name` and plural `album_names` keys were configured.
+    ConflictingCollectionAlbumNameForms { collection_handle: String },
+    /// The configured `album_names` list is empty.
+    EmptyCollectionAlbumNames { collection_handle: String },
+    /// Both singular `album_artist` and plural `album_artists` keys were configured.
+    ConflictingCollectionAlbumArtistForms { collection_handle: String },
+    /// The configured `album_artists` list is empty.
+    EmptyCollectionAlbumArtists { collection_handle: String },
+    /// Both singular `track_artist` and plural `track_artists` keys were configured.
+    ConflictingCollectionTrackArtistForms { collection_handle: String },
+    /// The configured `track_artists` list is empty.
+    EmptyCollectionTrackArtists { collection_handle: String },
     /// A collection declaration configured both TOML keys `directory` and `directories`.
     ConflictingCollectionDirectoryForms { collection_handle: String },
     /// A collection configured an empty `directory` path.
@@ -332,7 +383,47 @@ impl fmt::Display for InvalidLibraryBuildSpec {
             InvalidLibraryBuildSpec::MissingCollectionSelector { collection_handle } => {
                 write!(
                     f,
-                    "collection `{collection_handle}` must set at least one of the TOML keys `name`, `artist`, `directory`, or `directories`"
+                    "collection `{collection_handle}` must set at least one of the TOML keys `album_name`, `album_names`, `album_artist`, `album_artists`, `track_artist`, `track_artists`, `directory`, or `directories`"
+                )
+            }
+            InvalidLibraryBuildSpec::ConflictingCollectionAlbumNameForms { collection_handle } => {
+                write!(
+                    f,
+                    "collection `{collection_handle}` must set at most one of the TOML keys `album_name` or `album_names`"
+                )
+            }
+            InvalidLibraryBuildSpec::EmptyCollectionAlbumNames { collection_handle } => {
+                write!(
+                    f,
+                    "collection `{collection_handle}` has an empty `album_names` list"
+                )
+            }
+            InvalidLibraryBuildSpec::ConflictingCollectionAlbumArtistForms {
+                collection_handle,
+            } => {
+                write!(
+                    f,
+                    "collection `{collection_handle}` must set at most one of the TOML keys `album_artist` or `album_artists`"
+                )
+            }
+            InvalidLibraryBuildSpec::EmptyCollectionAlbumArtists { collection_handle } => {
+                write!(
+                    f,
+                    "collection `{collection_handle}` has an empty `album_artists` list"
+                )
+            }
+            InvalidLibraryBuildSpec::ConflictingCollectionTrackArtistForms {
+                collection_handle,
+            } => {
+                write!(
+                    f,
+                    "collection `{collection_handle}` must set at most one of the TOML keys `track_artist` or `track_artists`"
+                )
+            }
+            InvalidLibraryBuildSpec::EmptyCollectionTrackArtists { collection_handle } => {
+                write!(
+                    f,
+                    "collection `{collection_handle}` has an empty `track_artists` list"
                 )
             }
             InvalidLibraryBuildSpec::ConflictingCollectionDirectoryForms { collection_handle } => {
@@ -561,23 +652,37 @@ impl RawLibraryBuildSpec {
 impl RawCollectionDeclaration {
     /// Collapses one raw collection declaration into its validated form.
     ///
-    /// Metadata predicates are preserved exactly, including empty and
-    /// whitespace-only values. The singular `directory` and plural
-    /// `directories` forms collapse into one ordered list, and no successful
-    /// parse ever produces an empty list.
+    /// Singular metadata keys become one-element lists. Metadata strings are
+    /// preserved exactly, including empty and whitespace-only values. Plural
+    /// lists retain their order and repetitions. Supplying both forms in one
+    /// family is an error, even when values agree or the plural list is empty.
+    /// Empty plural metadata lists are also invalid. The singular and plural
+    /// directory keys conflict when both are supplied. Otherwise they produce
+    /// one ordered list. Empty directory paths, `directories = []`, and empty
+    /// entries in `directories` are rejected.
     fn into_declaration(
         self,
         collection_handle: &str,
     ) -> Result<CollectionDeclaration, LibraryBuildSpecError> {
         let RawCollectionDeclaration {
-            name,
-            artist,
+            album_name,
+            album_names,
+            album_artist,
+            album_artists,
+            track_artist,
+            track_artists,
             directory,
             directories,
         } = self;
 
-        let has_selector =
-            name.is_some() || artist.is_some() || directory.is_some() || directories.is_some();
+        let has_selector = album_name.is_some()
+            || album_names.is_some()
+            || album_artist.is_some()
+            || album_artists.is_some()
+            || track_artist.is_some()
+            || track_artists.is_some()
+            || directory.is_some()
+            || directories.is_some();
 
         if !has_selector {
             return Err(InvalidLibraryBuildSpec::MissingCollectionSelector {
@@ -585,6 +690,72 @@ impl RawCollectionDeclaration {
             }
             .into());
         }
+
+        let album_names = match (album_name, album_names) {
+            (Some(_), Some(_)) => {
+                return Err(
+                    InvalidLibraryBuildSpec::ConflictingCollectionAlbumNameForms {
+                        collection_handle: collection_handle.to_owned(),
+                    }
+                    .into(),
+                );
+            }
+            (Some(album_name), None) => Some(vec![album_name]),
+            (None, Some(album_names)) => {
+                if album_names.is_empty() {
+                    return Err(InvalidLibraryBuildSpec::EmptyCollectionAlbumNames {
+                        collection_handle: collection_handle.to_owned(),
+                    }
+                    .into());
+                }
+                Some(album_names)
+            }
+            (None, None) => None,
+        };
+
+        let album_artists = match (album_artist, album_artists) {
+            (Some(_), Some(_)) => {
+                return Err(
+                    InvalidLibraryBuildSpec::ConflictingCollectionAlbumArtistForms {
+                        collection_handle: collection_handle.to_owned(),
+                    }
+                    .into(),
+                );
+            }
+            (Some(album_artist), None) => Some(vec![album_artist]),
+            (None, Some(album_artists)) => {
+                if album_artists.is_empty() {
+                    return Err(InvalidLibraryBuildSpec::EmptyCollectionAlbumArtists {
+                        collection_handle: collection_handle.to_owned(),
+                    }
+                    .into());
+                }
+                Some(album_artists)
+            }
+            (None, None) => None,
+        };
+
+        let track_artists = match (track_artist, track_artists) {
+            (Some(_), Some(_)) => {
+                return Err(
+                    InvalidLibraryBuildSpec::ConflictingCollectionTrackArtistForms {
+                        collection_handle: collection_handle.to_owned(),
+                    }
+                    .into(),
+                );
+            }
+            (Some(track_artist), None) => Some(vec![track_artist]),
+            (None, Some(track_artists)) => {
+                if track_artists.is_empty() {
+                    return Err(InvalidLibraryBuildSpec::EmptyCollectionTrackArtists {
+                        collection_handle: collection_handle.to_owned(),
+                    }
+                    .into());
+                }
+                Some(track_artists)
+            }
+            (None, None) => None,
+        };
 
         let directories = match (directory, directories) {
             (None, None) => None,
@@ -625,8 +796,9 @@ impl RawCollectionDeclaration {
         };
 
         Ok(CollectionDeclaration {
-            name,
-            artist,
+            album_names,
+            album_artists,
+            track_artists,
             directories,
         })
     }

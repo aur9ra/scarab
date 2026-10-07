@@ -24,12 +24,12 @@ album_art = true
 include = ["lrc"]
 
 [collections.lateralus]
-name = "Lateralus"
-artist = "Tool"
+album_name = "Lateralus"
+album_artist = "Tool"
 
 [collections.ten_thousand_days]
-name = "10,000 Days"
-artist = "Tool"
+album_name = "10,000 Days"
+album_artist = "Tool"
 
 [[collection_rules]]
 collections = ["lateralus", "ten_thousand_days"]
@@ -57,15 +57,21 @@ fn parses_accepted_toml_example() {
     let lateralus = config
         .collection_declaration("lateralus")
         .expect("lateralus must be declared");
-    assert_eq!(lateralus.name.as_deref(), Some("Lateralus"));
-    assert_eq!(lateralus.artist.as_deref(), Some("Tool"));
+    assert_eq!(lateralus.album_names, Some(vec!["Lateralus".to_owned()]));
+    assert_eq!(lateralus.album_artists, Some(vec!["Tool".to_owned()]));
     assert_eq!(lateralus.directories, None);
 
     let ten_thousand_days = config
         .collection_declaration("ten_thousand_days")
         .expect("ten_thousand_days must be declared");
-    assert_eq!(ten_thousand_days.name.as_deref(), Some("10,000 Days"));
-    assert_eq!(ten_thousand_days.artist.as_deref(), Some("Tool"));
+    assert_eq!(
+        ten_thousand_days.album_names,
+        Some(vec!["10,000 Days".to_owned()])
+    );
+    assert_eq!(
+        ten_thousand_days.album_artists,
+        Some(vec!["Tool".to_owned()])
+    );
     assert_eq!(ten_thousand_days.directories, None);
 
     let collection_rules = config.collection_rules();
@@ -103,8 +109,8 @@ fn minimal_config_defaults_to_music_profile() {
     let declaration: &CollectionDeclaration = config
         .collection_declaration("aenima")
         .expect("aenima must be declared");
-    assert_eq!(declaration.name.as_deref(), Some("Ænima"));
-    assert_eq!(declaration.artist.as_deref(), Some("Tool"));
+    assert_eq!(declaration.album_names, Some(vec!["Ænima".to_owned()]));
+    assert_eq!(declaration.album_artists, Some(vec!["Tool".to_owned()]));
     assert_eq!(declaration.directories, None);
 
     assert!(config.collection_rules().is_empty());
@@ -141,7 +147,7 @@ fn rejects_unknown_keys_at_every_boundary() {
     rejects_toml("codec = \"opus\"\nbitrate = 128\n[files]\nbogus = true\n");
     // [collections.<handle>]
     rejects_toml(
-        "codec = \"opus\"\nbitrate = 128\n[collections.aenima]\nname = \"Ænima\"\nartist = \"Tool\"\nyear = 1996\n",
+        "codec = \"opus\"\nbitrate = 128\n[collections.aenima]\nalbum_name = \"Ænima\"\nalbum_artist = \"Tool\"\nyear = 1996\n",
     );
     // [[collection_rules]]
     rejects_toml(&prefixed(
@@ -161,7 +167,7 @@ fn rejects_unknown_keys_at_every_boundary() {
 fn rejects_replaced_album_schema_spellings_alongside_valid_collection_spellings() {
     rejects_toml(
         "codec = \"opus\"\nbitrate = 128\n\
-         [collections.aenima]\nname = \"Ænima\"\n\
+         [collections.aenima]\nalbum_name = \"Ænima\"\n\
          [albums.legacy]\ndirectory = \"legacy\"\n",
     );
     rejects_toml(&prefixed(

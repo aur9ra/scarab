@@ -25,10 +25,17 @@ fn collection_directories(config: &LibraryBuildSpec, handle: &str) -> Vec<PathBu
         .expect("collection should have directory selectors")
 }
 
+fn declaration(handle: &str, body: &str) -> CollectionDeclaration {
+    valid(&collection_config(handle, body))
+        .collection_declaration(handle)
+        .expect("collection must be declared")
+        .clone()
+}
+
 #[test]
 fn collection_declaration_order_is_preserved() {
     // Declared out of alphabetical order: z before a
-    let text = "codec = \"opus\"\nbitrate = 128\n[collections.z]\nname = \"Z\"\n[collections.a]\nname = \"A\"\n";
+    let text = "codec = \"opus\"\nbitrate = 128\n[collections.z]\nalbum_name = \"Z\"\n[collections.a]\nalbum_name = \"A\"\n";
     let config = valid(text);
 
     let handles: Vec<&str> = config
@@ -42,8 +49,8 @@ fn collection_declaration_order_is_preserved() {
 fn collection_declarations_yield_ordered_handle_declaration_pairs() {
     // Different declaration fields catch mismatched pairs.
     let text = "codec = \"opus\"\nbitrate = 128\n\
-                [collections.z]\nname = \"Z\"\ndirectory = \"z\"\n\
-                [collections.a]\nartist = \"A\"\n\
+                [collections.z]\nalbum_name = \"Z\"\ndirectory = \"z\"\n\
+                [collections.a]\nalbum_artist = \"A\"\n\
                 [collections.m]\ndirectories = [\"m1\", \"m2\"]\n";
     let config = valid(text);
 
@@ -52,20 +59,23 @@ fn collection_declarations_yield_ordered_handle_declaration_pairs() {
 
     let (handle, declaration) = declared[0];
     assert_eq!(handle, "z");
-    assert_eq!(declaration.name.as_deref(), Some("Z"));
-    assert_eq!(declaration.artist, None);
+    assert_eq!(declaration.album_names, Some(vec!["Z".to_owned()]));
+    assert_eq!(declaration.album_artists, None);
+    assert_eq!(declaration.track_artists, None);
     assert_eq!(declaration.directories, Some(vec![PathBuf::from("z")]));
 
     let (handle, declaration) = declared[1];
     assert_eq!(handle, "a");
-    assert_eq!(declaration.name, None);
-    assert_eq!(declaration.artist.as_deref(), Some("A"));
+    assert_eq!(declaration.album_names, None);
+    assert_eq!(declaration.album_artists, Some(vec!["A".to_owned()]));
+    assert_eq!(declaration.track_artists, None);
     assert_eq!(declaration.directories, None);
 
     let (handle, declaration) = declared[2];
     assert_eq!(handle, "m");
-    assert_eq!(declaration.name, None);
-    assert_eq!(declaration.artist, None);
+    assert_eq!(declaration.album_names, None);
+    assert_eq!(declaration.album_artists, None);
+    assert_eq!(declaration.track_artists, None);
     assert_eq!(
         declaration.directories,
         Some(vec![PathBuf::from("m1"), PathBuf::from("m2")])
@@ -89,12 +99,11 @@ fn invalid_declarations_are_reported_in_declaration_order() {
 
 #[test]
 fn adding_declaration_fields_preserves_handle_order() {
-    // Dotted declarations keep z first and `a` second even though z is
-    // given a name after `a` is introduced.
+    // Adding z's selector after a is declared must not change declaration order.
     let text = "codec = \"opus\"\nbitrate = 128\n\
                 collections.z.directory = \"z\"\n\
                 collections.a.directory = \"a\"\n\
-                collections.z.name = \"Z\"\n";
+                collections.z.album_name = \"Z\"\n";
     let config = valid(text);
 
     let handles: Vec<&str> = config
@@ -106,9 +115,8 @@ fn adding_declaration_fields_preserves_handle_order() {
         config
             .collection_declaration("z")
             .expect("z must be declared")
-            .name
-            .as_deref(),
-        Some("Z")
+            .album_names,
+        Some(vec!["Z".to_owned()])
     );
 }
 
@@ -118,8 +126,8 @@ fn collection_rule_references_do_not_establish_declaration_order() {
     // follows the declaration order of z then a.
     let text = "codec = \"opus\"\nbitrate = 128\n\
                 [[collection_rules]]\ncollections = [\"a\"]\nbitrate = 96\n\
-                [collections.z]\nname = \"Z\"\n\
-                [collections.a]\nname = \"A\"\n";
+                [collections.z]\nalbum_name = \"Z\"\n\
+                [collections.a]\nalbum_name = \"A\"\n";
     let config = valid(text);
 
     let handles: Vec<&str> = config
@@ -131,15 +139,17 @@ fn collection_rule_references_do_not_establish_declaration_order() {
 
 #[test]
 fn collection_declaration_lookup_is_exact() {
-    let config = valid(&collection_config("lateralus", "name = \"Lateralus\"\n"));
+    let config = valid(&collection_config(
+        "lateralus",
+        "album_name = \"Lateralus\"\n",
+    ));
 
     assert_eq!(
         config
             .collection_declaration("lateralus")
             .expect("lateralus must be declared")
-            .name
-            .as_deref(),
-        Some("Lateralus")
+            .album_names,
+        Some(vec!["Lateralus".to_owned()])
     );
 
     // Missing, differently cased, and padded handles do not match.
@@ -150,72 +160,278 @@ fn collection_declaration_lookup_is_exact() {
 }
 
 #[test]
-fn parses_optional_metadata_selectors() {
-    let name_only = valid(&collection_config("name_only", "name = \"Ænima\"\n"));
-    let declaration = name_only
-        .collection_declaration("name_only")
-        .expect("name_only must be declared");
-    assert_eq!(declaration.name.as_deref(), Some("Ænima"));
-    assert_eq!(declaration.artist, None);
-    assert_eq!(declaration.directories, None);
+fn metadata_families_accept_singular_and_plural_forms() {
+    let cases = [
+        ("album_name", "album_names", "album_names"),
+        ("album_artist", "album_artists", "album_artists"),
+        ("track_artist", "track_artists", "track_artists"),
+    ];
+    for (singular, plural, family) in cases {
+        let singular_declaration = declaration("single", &format!("{singular} = \"Value\"\n"));
+        let plural_declaration = declaration("single", &format!("{plural} = [\"Value\"]\n"));
+        for candidate in [&singular_declaration, &plural_declaration] {
+            assert_eq!(candidate.directories, None, "family {family}");
+            match family {
+                "album_names" => {
+                    assert_eq!(
+                        candidate.album_names,
+                        Some(vec!["Value".to_owned()]),
+                        "family {family}"
+                    );
+                    assert_eq!(candidate.album_artists, None, "family {family}");
+                    assert_eq!(candidate.track_artists, None, "family {family}");
+                }
+                "album_artists" => {
+                    assert_eq!(candidate.album_names, None, "family {family}");
+                    assert_eq!(
+                        candidate.album_artists,
+                        Some(vec!["Value".to_owned()]),
+                        "family {family}"
+                    );
+                    assert_eq!(candidate.track_artists, None, "family {family}");
+                }
+                "track_artists" => {
+                    assert_eq!(candidate.album_names, None, "family {family}");
+                    assert_eq!(candidate.album_artists, None, "family {family}");
+                    assert_eq!(
+                        candidate.track_artists,
+                        Some(vec!["Value".to_owned()]),
+                        "family {family}"
+                    );
+                }
+                _ => unreachable!(),
+            }
+        }
 
-    let artist_only = valid(&collection_config("artist_only", "artist = \"Tool\"\n"));
-    let declaration = artist_only
-        .collection_declaration("artist_only")
-        .expect("artist_only must be declared");
-    assert_eq!(declaration.name, None);
-    assert_eq!(declaration.artist.as_deref(), Some("Tool"));
-    assert_eq!(declaration.directories, None);
+        let plural_multi = declaration("multi", &format!("{plural} = [\"A\", \"B\"]\n"));
+        match family {
+            "album_names" => assert_eq!(
+                plural_multi.album_names,
+                Some(vec!["A".to_owned(), "B".to_owned()])
+            ),
+            "album_artists" => assert_eq!(
+                plural_multi.album_artists,
+                Some(vec!["A".to_owned(), "B".to_owned()])
+            ),
+            "track_artists" => assert_eq!(
+                plural_multi.track_artists,
+                Some(vec!["A".to_owned(), "B".to_owned()])
+            ),
+            _ => unreachable!(),
+        }
+    }
+}
 
-    let empty_name = valid(&collection_config("empty_name", "name = \"\"\n"));
-    let declaration = empty_name
-        .collection_declaration("empty_name")
-        .expect("empty_name must be declared");
-    assert_eq!(declaration.name.as_deref(), Some(""));
-    assert_eq!(declaration.artist, None);
-    assert_eq!(declaration.directories, None);
+#[test]
+fn singular_and_one_element_plural_metadata_forms_are_canonically_equal() {
+    let cases = [
+        ("album_name", "album_names"),
+        ("album_artist", "album_artists"),
+        ("track_artist", "track_artists"),
+    ];
+    for (singular, plural) in cases {
+        let singular_text = collection_config("item", &format!("{singular} = \"Value\"\n"));
+        let plural_text = collection_config("item", &format!("{plural} = [\"Value\"]\n"));
+        assert_eq!(
+            valid(&singular_text),
+            valid(&plural_text),
+            "family {singular} and {plural} must canonicalize identically"
+        );
+    }
+}
 
-    let empty_artist = valid(&collection_config("empty_artist", "artist = \"\"\n"));
-    let declaration = empty_artist
-        .collection_declaration("empty_artist")
-        .expect("empty_artist must be declared");
-    assert_eq!(declaration.name, None);
-    assert_eq!(declaration.artist.as_deref(), Some(""));
-    assert_eq!(declaration.directories, None);
+#[test]
+fn metadata_family_conflicts_report_family_conflict() {
+    let cases = [
+        (
+            "album_name",
+            "album_names",
+            InvalidLibraryBuildSpec::ConflictingCollectionAlbumNameForms {
+                collection_handle: "both".into(),
+            },
+        ),
+        (
+            "album_artist",
+            "album_artists",
+            InvalidLibraryBuildSpec::ConflictingCollectionAlbumArtistForms {
+                collection_handle: "both".into(),
+            },
+        ),
+        (
+            "track_artist",
+            "track_artists",
+            InvalidLibraryBuildSpec::ConflictingCollectionTrackArtistForms {
+                collection_handle: "both".into(),
+            },
+        ),
+    ];
+    for (singular, plural, expected) in cases {
+        // Distinct values conflict.
+        let distinct =
+            collection_config("both", &format!("{singular} = \"A\"\n{plural} = [\"B\"]\n"));
+        assert_eq!(invalid(&distinct), expected);
+
+        // Equivalent values still conflict.
+        let equivalent =
+            collection_config("both", &format!("{singular} = \"A\"\n{plural} = [\"A\"]\n"));
+        assert_eq!(invalid(&equivalent), expected);
+
+        // Singular plus empty plural reports the conflict, not the empty list.
+        let with_empty = collection_config("both", &format!("{singular} = \"A\"\n{plural} = []\n"));
+        assert_eq!(invalid(&with_empty), expected);
+    }
+}
+
+#[test]
+fn empty_plural_metadata_lists_are_invalid() {
+    let cases = [
+        (
+            "album_names",
+            InvalidLibraryBuildSpec::EmptyCollectionAlbumNames {
+                collection_handle: "empty".into(),
+            },
+        ),
+        (
+            "album_artists",
+            InvalidLibraryBuildSpec::EmptyCollectionAlbumArtists {
+                collection_handle: "empty".into(),
+            },
+        ),
+        (
+            "track_artists",
+            InvalidLibraryBuildSpec::EmptyCollectionTrackArtists {
+                collection_handle: "empty".into(),
+            },
+        ),
+    ];
+    for (plural, expected) in cases {
+        let text = collection_config("empty", &format!("{plural} = []\n"));
+        assert_eq!(invalid(&text), expected);
+    }
+}
+
+#[test]
+fn empty_and_whitespace_singular_metadata_strings_are_valid() {
+    let cases = [
+        ("album_name", "album_names"),
+        ("album_artist", "album_artists"),
+        ("track_artist", "track_artists"),
+    ];
+    for (singular, family) in cases {
+        for value in ["", "   "] {
+            let candidate = declaration("item", &format!("{singular} = \"{value}\"\n"));
+            let expected = Some(vec![value.to_owned()]);
+            match family {
+                "album_names" => {
+                    assert_eq!(candidate.album_names, expected);
+                    assert_eq!(candidate.album_artists, None);
+                    assert_eq!(candidate.track_artists, None);
+                }
+                "album_artists" => {
+                    assert_eq!(candidate.album_names, None);
+                    assert_eq!(candidate.album_artists, expected);
+                    assert_eq!(candidate.track_artists, None);
+                }
+                "track_artists" => {
+                    assert_eq!(candidate.album_names, None);
+                    assert_eq!(candidate.album_artists, None);
+                    assert_eq!(candidate.track_artists, expected);
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+}
+
+#[test]
+fn plural_metadata_values_preserve_order_repetition_and_empty_strings() {
+    let cases = ["album_names", "album_artists", "track_artists"];
+    for plural in cases {
+        let body = format!("{plural} = [\"\", \"B\", \"A\", \"B\", \"   \"]\n");
+        let candidate = declaration("item", &body);
+        let expected = Some(vec![
+            "".to_owned(),
+            "B".to_owned(),
+            "A".to_owned(),
+            "B".to_owned(),
+            "   ".to_owned(),
+        ]);
+        match plural {
+            "album_names" => assert_eq!(candidate.album_names, expected),
+            "album_artists" => assert_eq!(candidate.album_artists, expected),
+            "track_artists" => assert_eq!(candidate.track_artists, expected),
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[test]
+fn metadata_values_preserve_matching_sensitive_raw_spellings() {
+    // NFC normalization or trailing-NUL removal would alter these values.
+    let decomposed = "Bjo\\u0308rk";
+    let nul_terminated = "Track\\u0000\\u0000";
+    let cases = ["album_names", "album_artists", "track_artists"];
+    for plural in cases {
+        let body = format!("{plural} = [\"{decomposed}\", \"{nul_terminated}\", \"B\"]\n");
+        let candidate = declaration("item", &body);
+        let expected = Some(vec![
+            "Bjo\u{0308}rk".to_owned(),
+            "Track\0\0".to_owned(),
+            "B".to_owned(),
+        ]);
+        match plural {
+            "album_names" => assert_eq!(candidate.album_names, expected),
+            "album_artists" => assert_eq!(candidate.album_artists, expected),
+            "track_artists" => assert_eq!(candidate.track_artists, expected),
+            _ => unreachable!(),
+        }
+    }
+
+    for singular in ["album_name", "album_artist", "track_artist"] {
+        let candidate = declaration("item", &format!("{singular} = \"{decomposed}\"\n"));
+        let expected = Some(vec!["Bjo\u{0308}rk".to_owned()]);
+        match singular {
+            "album_name" => assert_eq!(candidate.album_names, expected),
+            "album_artist" => assert_eq!(candidate.album_artists, expected),
+            "track_artist" => assert_eq!(candidate.track_artists, expected),
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[test]
 fn collection_metadata_values_are_preserved_exactly() {
-    let whitespace = valid(&collection_config("blank", "name = \"   \"\n"));
+    let whitespace = valid(&collection_config("blank", "album_name = \"   \"\n"));
     assert_eq!(
         whitespace
             .collection_declaration("blank")
             .expect("blank must be declared")
-            .name
-            .as_deref(),
-        Some("   ")
+            .album_names,
+        Some(vec!["   ".to_owned()])
     );
 
-    let with_artist = valid(&collection_config(
+    let combined = valid(&collection_config(
         "blank",
-        "name = \"\"\nartist = \"  \"\n",
+        "album_name = \"\"\nalbum_artist = \"  \"\n",
     ));
-    let declaration = with_artist
+    let declaration = combined
         .collection_declaration("blank")
         .expect("blank must be declared");
-    assert_eq!(declaration.name.as_deref(), Some(""));
-    assert_eq!(declaration.artist.as_deref(), Some("  "));
+    assert_eq!(declaration.album_names, Some(vec!["".to_owned()]));
+    assert_eq!(declaration.album_artists, Some(vec!["  ".to_owned()]));
+    assert_eq!(declaration.track_artists, None);
     assert_eq!(declaration.directories, None);
 
     let with_directory = valid(&collection_config(
         "blank",
-        "name = \"\"\ndirectory = \"Undertow\"\n",
+        "album_name = \"\"\ndirectory = \"Undertow\"\n",
     ));
     let declaration = with_directory
         .collection_declaration("blank")
         .expect("blank must be declared");
-    assert_eq!(declaration.name.as_deref(), Some(""));
-    assert_eq!(declaration.artist, None);
+    assert_eq!(declaration.album_names, Some(vec!["".to_owned()]));
+    assert_eq!(declaration.album_artists, None);
+    assert_eq!(declaration.track_artists, None);
     assert_eq!(
         declaration.directories,
         Some(vec![PathBuf::from("Undertow")])
@@ -228,8 +444,9 @@ fn parses_directory_only_collections() {
     let declaration = singular
         .collection_declaration("fs_only")
         .expect("fs_only must be declared");
-    assert_eq!(declaration.name, None);
-    assert_eq!(declaration.artist, None);
+    assert_eq!(declaration.album_names, None);
+    assert_eq!(declaration.album_artists, None);
+    assert_eq!(declaration.track_artists, None);
     assert_eq!(
         declaration.directories,
         Some(vec![PathBuf::from("Undertow")])
@@ -242,8 +459,9 @@ fn parses_directory_only_collections() {
     let declaration = plural
         .collection_declaration("fs_only")
         .expect("fs_only must be declared");
-    assert_eq!(declaration.name, None);
-    assert_eq!(declaration.artist, None);
+    assert_eq!(declaration.album_names, None);
+    assert_eq!(declaration.album_artists, None);
+    assert_eq!(declaration.track_artists, None);
     assert_eq!(
         declaration.directories,
         Some(vec![PathBuf::from("Disc 1"), PathBuf::from("Disc 2")])
@@ -254,17 +472,33 @@ fn parses_directory_only_collections() {
 fn parses_metadata_with_directory_selectors() {
     let config = valid(&collection_config(
         "mixed",
-        "name = \"Lateralus\"\nartist = \"Tool\"\ndirectories = [\"Disc 1\", \"Disc 2\"]\n",
+        "album_name = \"Lateralus\"\nalbum_artist = \"Tool\"\ntrack_artist = \"Maynard\"\ndirectories = [\"Disc 1\", \"Disc 2\"]\n",
     ));
     let declaration = config
         .collection_declaration("mixed")
         .expect("mixed must be declared");
-    assert_eq!(declaration.name.as_deref(), Some("Lateralus"));
-    assert_eq!(declaration.artist.as_deref(), Some("Tool"));
+    assert_eq!(declaration.album_names, Some(vec!["Lateralus".to_owned()]));
+    assert_eq!(declaration.album_artists, Some(vec!["Tool".to_owned()]));
+    assert_eq!(declaration.track_artists, Some(vec!["Maynard".to_owned()]));
     assert_eq!(
         declaration.directories,
         Some(vec![PathBuf::from("Disc 1"), PathBuf::from("Disc 2")])
     );
+}
+
+#[test]
+fn metadata_only_declarations_remain_valid() {
+    for body in [
+        "album_name = \"A\"\n",
+        "album_names = [\"A\", \"B\"]\n",
+        "album_artist = \"A\"\n",
+        "album_artists = [\"A\"]\n",
+        "track_artist = \"A\"\n",
+        "track_artists = [\"A\", \"A\"]\n",
+        "album_name = \"A\"\nalbum_artist = \"B\"\ntrack_artist = \"C\"\n",
+    ] {
+        valid(&collection_config("meta", body));
+    }
 }
 
 #[test]
@@ -279,11 +513,52 @@ fn singular_and_one_element_plural_forms_are_equivalent() {
     let declaration = singular
         .collection_declaration("undertow")
         .expect("undertow must be declared");
-    assert_eq!(declaration.name, None);
-    assert_eq!(declaration.artist, None);
+    assert_eq!(declaration.album_names, None);
+    assert_eq!(declaration.album_artists, None);
+    assert_eq!(declaration.track_artists, None);
     assert_eq!(
         declaration.directories,
         Some(vec![PathBuf::from("Undertow")])
+    );
+}
+
+#[test]
+fn removed_metadata_keys_are_unknown_fields() {
+    rejects_toml(&collection_config("legacy", "name = \"Ænima\"\n"));
+    rejects_toml(&collection_config("legacy", "artist = \"Tool\"\n"));
+    rejects_toml(&collection_config(
+        "legacy",
+        "name = \"Ænima\"\nartist = \"Tool\"\n",
+    ));
+    // The old `name` and `artist` keys are not aliases. TOML rejects them even
+    // alongside a valid key.
+    rejects_toml(&collection_config(
+        "legacy",
+        "album_name = \"Ænima\"\nname = \"Ænima\"\n",
+    ));
+    rejects_toml(&collection_config(
+        "legacy",
+        "album_artist = \"Tool\"\nartist = \"Tool\"\n",
+    ));
+}
+
+#[test]
+fn rejects_overloaded_and_nested_metadata_forms() {
+    // Singular keys require strings. Plural keys require string lists.
+    rejects_toml(&collection_config("typed", "album_names = \"A\"\n"));
+    rejects_toml(&collection_config("typed", "album_name = [\"A\"]\n"));
+    rejects_toml(&collection_config("typed", "album_artists = \"A\"\n"));
+    rejects_toml(&collection_config("typed", "album_artist = [\"A\"]\n"));
+    rejects_toml(&collection_config("typed", "track_artists = \"A\"\n"));
+    rejects_toml(&collection_config("typed", "track_artist = [\"A\"]\n"));
+    // Nested tables are not selectors.
+    rejects_toml(&collection_config("typed", "metadata = \"A\"\n"));
+    rejects_toml(&collection_config("typed", "selectors = [\"A\"]\n"));
+    rejects_toml(
+        "codec = \"opus\"\nbitrate = 128\n[collections.typed]\nalbum_name = \"A\"\n[collections.typed.metadata]\nalbum_name = \"A\"\n",
+    );
+    rejects_toml(
+        "codec = \"opus\"\nbitrate = 128\n[collections.typed]\nalbum_name = \"A\"\n[collections.typed.selectors]\nalbum_names = [\"A\"]\n",
     );
 }
 
@@ -392,7 +667,8 @@ fn collection_requires_nonempty_directories_list() {
         }
     );
 
-    let list_with_metadata = collection_config("empty_list", "name = \"\"\ndirectories = []\n");
+    let list_with_metadata =
+        collection_config("empty_list", "album_name = \"\"\ndirectories = []\n");
     assert_eq!(
         invalid(&list_with_metadata),
         InvalidLibraryBuildSpec::EmptyCollectionDirectories {
@@ -411,7 +687,8 @@ fn collection_requires_nonempty_directory_path() {
         }
     );
 
-    let path_with_metadata = collection_config("empty_path", "artist = \"\"\ndirectory = \"\"\n");
+    let path_with_metadata =
+        collection_config("empty_path", "album_artist = \"\"\ndirectory = \"\"\n");
     assert_eq!(
         invalid(&path_with_metadata),
         InvalidLibraryBuildSpec::EmptyCollectionDirectory {
@@ -443,8 +720,20 @@ fn collection_rejects_empty_directories_entry() {
 
 #[test]
 fn rejects_incorrect_collection_field_types() {
-    rejects_toml(&collection_config("typed", "name = true\n"));
-    rejects_toml(&collection_config("typed", "artist = 2001\n"));
+    rejects_toml(&collection_config("typed", "album_name = true\n"));
+    rejects_toml(&collection_config("typed", "album_name = 2001\n"));
+    rejects_toml(&collection_config("typed", "album_name = [\"A\"]\n"));
+    rejects_toml(&collection_config("typed", "album_names = \"A\"\n"));
+    rejects_toml(&collection_config("typed", "album_names = 5\n"));
+    rejects_toml(&collection_config("typed", "album_names = [\"a\", 2]\n"));
+    rejects_toml(&collection_config("typed", "album_names = [true]\n"));
+    rejects_toml(&collection_config("typed", "album_artist = true\n"));
+    rejects_toml(&collection_config("typed", "album_artists = \"A\"\n"));
+    rejects_toml(&collection_config("typed", "album_artists = [\"a\", 2]\n"));
+    rejects_toml(&collection_config("typed", "track_artist = 2001\n"));
+    rejects_toml(&collection_config("typed", "track_artists = \"A\"\n"));
+    rejects_toml(&collection_config("typed", "track_artists = [\"a\", 2]\n"));
+    rejects_toml(&collection_config("typed", "track_artists = [true]\n"));
     rejects_toml(&collection_config("typed", "directory = 5\n"));
     rejects_toml(&collection_config("typed", "directories = \"Disc 1\"\n"));
     rejects_toml(&collection_config("typed", "directories = [\"a\", 2]\n"));
@@ -455,7 +744,43 @@ fn rejects_incorrect_collection_field_types() {
 fn validation_messages_name_collection_identities_and_toml_keys() {
     assert_eq!(
         invalid(&collection_config("bare", "")).to_string(),
-        "collection `bare` must set at least one of the TOML keys `name`, `artist`, `directory`, or `directories`"
+        "collection `bare` must set at least one of the TOML keys `album_name`, `album_names`, `album_artist`, `album_artists`, `track_artist`, `track_artists`, `directory`, or `directories`"
+    );
+    assert_eq!(
+        invalid(&collection_config(
+            "both_names",
+            "album_name = \"A\"\nalbum_names = [\"B\"]\n"
+        ))
+        .to_string(),
+        "collection `both_names` must set at most one of the TOML keys `album_name` or `album_names`"
+    );
+    assert_eq!(
+        invalid(&collection_config(
+            "both_artists",
+            "album_artist = \"A\"\nalbum_artists = [\"B\"]\n"
+        ))
+        .to_string(),
+        "collection `both_artists` must set at most one of the TOML keys `album_artist` or `album_artists`"
+    );
+    assert_eq!(
+        invalid(&collection_config(
+            "both_tracks",
+            "track_artist = \"A\"\ntrack_artists = [\"B\"]\n"
+        ))
+        .to_string(),
+        "collection `both_tracks` must set at most one of the TOML keys `track_artist` or `track_artists`"
+    );
+    assert_eq!(
+        invalid(&collection_config("empty", "album_names = []\n")).to_string(),
+        "collection `empty` has an empty `album_names` list"
+    );
+    assert_eq!(
+        invalid(&collection_config("empty", "album_artists = []\n")).to_string(),
+        "collection `empty` has an empty `album_artists` list"
+    );
+    assert_eq!(
+        invalid(&collection_config("empty", "track_artists = []\n")).to_string(),
+        "collection `empty` has an empty `track_artists` list"
     );
     assert_eq!(
         invalid(&collection_config(

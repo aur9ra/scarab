@@ -12,9 +12,10 @@
 //! model or reports the first problem it finds. Ambiguity, such as a rule
 //! applied twice, is rejected instead of being decided by declaration order.
 //!
-//! Collection declarations describe membership criteria. A declaration's
-//! `name` and `artist` fields remain metadata selectors, while `directory` and
-//! `directories` select source paths.
+//! Collection declarations define membership criteria. The `album_names`,
+//! `album_artists`, and `track_artists` fields hold selectors from their
+//! singular or plural TOML keys. The `directory` and `directories` keys select
+//! source paths.
 //!
 //! [`discover_source_files`] recursively collects ordinary files under one
 //! source root. [`resolve_directory_selector`] resolves one configured
