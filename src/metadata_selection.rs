@@ -48,6 +48,7 @@ pub(crate) fn metadata_values_match(left: &str, right: &str) -> bool {
 /// means no observation values are stored; an empty or NUL-only observation
 /// value, if present, is a member of the set. [`BTreeSet`] iteration order is
 /// an implementation detail, not a domain ordering contract.
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 pub(crate) struct MetadataSelectorObservation {
     album_names: BTreeSet<String>,
     album_artists: BTreeSet<String>,

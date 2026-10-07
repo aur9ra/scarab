@@ -48,6 +48,7 @@ mod required_discovery;
 mod source_audio;
 #[cfg(test)]
 mod test_support;
+mod vorbis_comments;
 
 pub use config::{
     Codec, CollectionDeclaration, CollectionRule, EncodingProfile, FilesConfig,
