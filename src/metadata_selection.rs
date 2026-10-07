@@ -20,9 +20,13 @@
 // Review this allowance when adding callers.
 #![allow(dead_code)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use unicode_normalization::UnicodeNormalization;
+
+fn comparison_chars(value: &str) -> impl Iterator<Item = char> + '_ {
+    value.trim_end_matches('\0').nfc()
+}
 
 /// Reports whether two supplied metadata values match under Scarab's
 /// metadata-selector comparison rule.
@@ -33,9 +37,7 @@ use unicode_normalization::UnicodeNormalization;
 /// (including semicolons), embedded and leading U+0000, and compatibility
 /// differences remain significant. Neither input is modified.
 pub(crate) fn metadata_values_match(left: &str, right: &str) -> bool {
-    left.trim_end_matches('\0')
-        .nfc()
-        .eq(right.trim_end_matches('\0').nfc())
+    comparison_chars(left).eq(comparison_chars(right))
 }
 
 /// Represents a complete, successful observation of album names, album
@@ -107,22 +109,32 @@ impl MetadataSelectorPredicate {
     }
 }
 
+/// Creates an evaluation key under [`metadata_values_match`].
+fn comparison_key(value: &str) -> String {
+    comparison_chars(value).collect()
+}
+
 /// Returns whether any predicate value matches an observation value in this
 /// family. `None` imposes no constraint.
 fn family_matches(
     observation_values: &BTreeSet<String>,
     predicate_values: Option<&[String]>,
 ) -> bool {
-    // HACK: this is some awful O(n^2) nonsense
-    // fix later. wrote method in 30 seconds
-    match predicate_values {
-        None => true,
-        Some(predicate_values) => predicate_values.iter().any(|predicate_value| {
-            observation_values
-                .iter()
-                .any(|observation_value| metadata_values_match(predicate_value, observation_value))
-        }),
+    let Some(predicate_values) = predicate_values else {
+        return true;
+    };
+    if predicate_values.is_empty() || observation_values.is_empty() {
+        return false;
     }
+
+    // Normalize each observation once without changing stored-value identity.
+    let observation_keys: HashSet<String> = observation_values
+        .iter()
+        .map(|value| comparison_key(value))
+        .collect();
+    predicate_values
+        .iter()
+        .any(|value| observation_keys.contains(&comparison_key(value)))
 }
 
 /// Returns whether the compound predicate matches the complete observation.
@@ -569,8 +581,22 @@ mod tests {
             BTreeSet::new(),
         );
 
+        let predicate_album_names = vec![
+            "Bjo\u{0308}rk\0\0".to_owned(),
+            composed.clone(),
+            decomposed.clone(),
+            composed.clone(),
+        ];
+        let predicate_album_artists = vec!["\0\0".to_owned(), "".to_owned()];
+        let predicate = MetadataSelectorPredicate::new(
+            Some(predicate_album_names.clone()),
+            Some(predicate_album_artists.clone()),
+            None,
+        );
+        assert!(observation_matches_predicate(&observation, &predicate));
+
         // The set removes only exact duplicates, not matching-equivalent
-        // observation values.
+        // observation values, including after evaluation.
         assert_eq!(observation.album_names.len(), 3);
         assert!(observation.album_names.contains(&composed));
         assert!(observation.album_names.contains(&decomposed));
@@ -581,6 +607,53 @@ mod tests {
         assert!(observation.album_artists.contains(""));
         assert!(observation.album_artists.contains("\0"));
         assert!(observation.track_artists.is_empty());
+        assert_eq!(predicate.album_names, Some(predicate_album_names));
+        assert_eq!(predicate.album_artists, Some(predicate_album_artists));
+        assert_eq!(predicate.track_artists, None);
+    }
+
+    #[test]
+    fn family_matching_agrees_with_value_comparison() {
+        let values = [
+            "",
+            "\0",
+            "\0\0",
+            "\u{00E9}",
+            "e\u{0301}",
+            "e\u{0301}\0\0",
+            "Album",
+            "Album\0",
+            "Album\0\0",
+            "album",
+            " Album",
+            "Album ",
+            "Album\t",
+            "\0Album",
+            "A\0B",
+            "AB",
+            "e\0\u{0301}",
+            "Artist A; Artist B",
+            "Artist A;Artist B",
+            "Artist A",
+            "AC/DC",
+            "ACDC",
+            "\u{FB01}",
+            "fi",
+            "\u{FF21}",
+            "A",
+        ];
+
+        for observed in values {
+            let observation_values = to_observation_values(&[observed]);
+            for alternative in values {
+                let predicate_values = vec![alternative.to_owned()];
+                assert_eq!(
+                    family_matches(&observation_values, Some(&predicate_values)),
+                    metadata_values_match(observed, alternative),
+                    "family comparison disagreed for {observed:?} and {alternative:?}"
+                );
+            }
+        }
     }
 
     #[test]
