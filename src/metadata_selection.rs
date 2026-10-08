@@ -16,8 +16,11 @@
 //! supplied empty list never matches. Observation values in one family cannot
 //! satisfy predicate values in another family.
 
-// Production code does not use these items yet.
-// Review this allowance when adding callers.
+// No non-test production entry point reaches the metadata-selection path yet.
+// Its consumers in configuration, Vorbis projection, and collection membership
+// are unreachable from production code, and `metadata_values_match` has no
+// caller outside this module's tests. Remove this allowance when a production
+// entry point uses the path.
 #![allow(dead_code)]
 
 use std::collections::{BTreeSet, HashSet};

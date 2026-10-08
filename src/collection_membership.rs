@@ -4,63 +4,104 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! Directory-only membership for configured collections from a completed
+//! Reader-independent collection membership evaluation from a completed
 //! observed source file inventory.
 //!
-//! A collection declaration supplies membership criteria. For a directory-only
-//! declaration, an observed source file is a member when it is classified as
-//! source audio and one of the declaration's configured directory scopes reports it.
+//! Every configured declaration produces a result, even when its domain is
+//! empty. Its domain comes from inventory reporting associations. Declarations
+//! with configured directory selectors use source-audio files reported by
+//! their own configured scopes. Declarations without them use source-audio
+//! files reported by the shared default source-root scope if it names their
+//! handle. Path ancestry, containment, or equal resolved roots do not establish
+//! the required association. Another collection's scope does not qualify on its
+//! own.
 //!
-//! An observed source file appears at most once in each collection but may
-//! belong to several collections. Membership copies its retained observed
-//! pathname unchanged and does not probe files, inspect metadata, access the
-//! filesystem, or decide output suitability.
+//! Each inventory pathname appears at most once in a collection's results,
+//! though it may belong to several collections. Evaluation uses only the spec,
+//! inventory, and supplied extraction outcomes. It does not read source files,
+//! access the filesystem, probe media, or decide output policy.
 //!
-//! Declarations with metadata selectors remain unevaluated. They are
-//! reported separately, not as collections with empty membership.
+//! Directory-only declarations include every in-domain file. Metadata
+//! selectors filter the domain, so declarations with both directory and
+//! metadata selectors include only files matching both.
+//!
+//! For metadata-dependent declarations, a missing extraction outcome leaves an
+//! in-domain file unresolved as unavailable. A failed extraction outcome leaves it
+//! unresolved and borrows the failure payload. A successful non-match is a resolved
+//! non-member. Extraction outcomes outside a collection's domain have no effect, and
+//! metadata-map entries never add inventory files.
+//!
+//! Membership preserves inventory pathname spelling and uses native `Path`
+//! equality for outcome lookup. It owns collection handles and result
+//! pathnames, borrows failure payloads from the supplied outcomes, and cannot
+//! outlive them. The payload type `MetadataFailure` is opaque caller context
+//! and has no trait bounds.
 
 // This module is used only by its tests. Keep it private until the build
 // pipeline uses it.
 #![allow(dead_code)]
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use crate::config::{CollectionDeclaration, LibraryBuildSpec};
+use crate::metadata_selection::{
+    MetadataSelectorObservation, MetadataSelectorPredicate, observation_matches_predicate,
+};
 use crate::observed_source_file_inventory::{
     ObservedSourceFile, ObservedSourceFileInventory, RequiredScope,
 };
 use crate::source_audio::classify_source_audio;
 
-/// Directory-only membership results for one validated build specification.
+/// One supplied metadata extraction outcome per pathname, keyed by native `Path` equality.
+pub(crate) type MetadataExtractionOutcomes<MetadataFailure> =
+    HashMap<PathBuf, Result<MetadataSelectorObservation, MetadataFailure>>;
+
+/// Membership results of every declaration in one validated build specification.
 #[derive(Debug)]
-pub(crate) struct CollectionMembership {
-    collections: Vec<CollectionMembers>,
-    unevaluated_collection_handles: Vec<String>,
+pub(crate) struct CollectionMembership<'metadata, MetadataFailure> {
+    collections: Vec<CollectionMembers<'metadata, MetadataFailure>>,
 }
 
-/// Established directory-only membership for one evaluated collection.
+/// Established members and unresolved files for one collection.
 #[derive(Debug)]
-pub(crate) struct CollectionMembers {
+pub(crate) struct CollectionMembers<'metadata, MetadataFailure> {
     collection_handle: String,
     members: Vec<PathBuf>,
+    unresolved: Vec<UnresolvedMembership<'metadata, MetadataFailure>>,
 }
 
-impl CollectionMembership {
+/// An in-domain file in a metadata-dependent collection with a missing or
+/// failed metadata outcome.
+#[derive(Debug)]
+pub(crate) struct UnresolvedMembership<'metadata, MetadataFailure> {
+    path: PathBuf,
+    reason: UnresolvedMetadataReason<'metadata, MetadataFailure>,
+}
+
+/// Why membership is unresolved for an in-domain file with a missing or failed
+/// metadata outcome.
+#[derive(Debug)]
+pub(crate) enum UnresolvedMetadataReason<'metadata, MetadataFailure> {
+    /// No outcome was supplied for the file's pathname.
+    Unavailable,
+    /// The supplied failure payload, borrowed unchanged.
+    Failed(&'metadata MetadataFailure),
+}
+
+impl<'metadata, MetadataFailure> CollectionMembership<'metadata, MetadataFailure> {
     /// Evaluated collections in declaration order.
-    pub(crate) fn collections(&self) -> &[CollectionMembers] {
+    pub(crate) fn collections(&self) -> &[CollectionMembers<'metadata, MetadataFailure>] {
         &self.collections
     }
 
-    /// Declarations with metadata predicates left unevaluated.
-    ///
-    /// These declarations have no established membership, unlike an evaluated
-    /// collection with no members.
-    pub(crate) fn unevaluated_collection_handles(&self) -> &[String] {
-        &self.unevaluated_collection_handles
+    /// Whether all collections are complete.
+    pub(crate) fn is_complete(&self) -> bool {
+        self.collections.iter().all(CollectionMembers::is_complete)
     }
 }
 
-impl CollectionMembers {
+impl<'metadata, MetadataFailure> CollectionMembers<'metadata, MetadataFailure> {
     /// The configuration handle of this collection.
     pub(crate) fn collection_handle(&self) -> &str {
         &self.collection_handle
@@ -70,78 +111,158 @@ impl CollectionMembers {
     pub(crate) fn members(&self) -> &[PathBuf] {
         &self.members
     }
+
+    /// In-domain files with unresolved membership, in no specified order.
+    pub(crate) fn unresolved(&self) -> &[UnresolvedMembership<'metadata, MetadataFailure>] {
+        &self.unresolved
+    }
+
+    /// Whether this collection has no unresolved in-domain files.
+    pub(crate) fn is_complete(&self) -> bool {
+        self.unresolved.is_empty()
+    }
 }
 
-/// Builds directory-only membership for `spec` using a completed `inventory`.
+impl<'metadata, MetadataFailure> UnresolvedMembership<'metadata, MetadataFailure> {
+    /// The inventory pathname, with its spelling preserved.
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Why this file's membership is unresolved.
+    pub(crate) fn reason(&self) -> &UnresolvedMetadataReason<'metadata, MetadataFailure> {
+        &self.reason
+    }
+}
+
+/// Evaluates every collection declared in `spec` using `inventory` and
+/// `metadata_extraction_outcomes`.
 ///
-/// Declarations with any supplied metadata selector (`album_names`,
-/// `album_artists`, or `track_artists`) are reported as unevaluated, regardless
-/// of their directory associations. All other declarations are evaluated even
-/// if none of the files reported by their configured directory scopes are
-/// recognized as source audio.
+/// Only inventory files recognized by [`classify_source_audio`] participate. A
+/// declaration with configured directory selectors uses files reported by its
+/// own configured scopes. Without them, it uses files reported by the default
+/// source-root scope that names its handle. Directory-only declarations include
+/// every participating in-domain file. Metadata selectors include files only when
+/// their successful outcome matches. Missing outcomes leave files unresolved as
+/// unavailable, supplied failures remain unresolved with their payload borrowed
+/// unchanged, and successful nonmatches are known non-members.
 ///
-/// For an evaluated collection, an observed source file is a member when
-/// [`classify_source_audio`] recognizes its pathname and one of the collection's
-/// configured directory scopes reported it. The file appears only once in that
-/// collection even if multiple of its configured directory scopes reported it.
-/// Its retained observed pathname is copied unchanged into the membership result.
-/// Distinct observed source files remain distinct.
-pub(crate) fn directory_only_membership(
+/// Returns one result per declaration in declaration order, including empty
+/// domains. The inputs are not modified.
+pub(crate) fn evaluate_collection_membership<'metadata, MetadataFailure>(
     spec: &LibraryBuildSpec,
     inventory: &ObservedSourceFileInventory,
-) -> CollectionMembership {
+    metadata_extraction_outcomes: &'metadata MetadataExtractionOutcomes<MetadataFailure>,
+) -> CollectionMembership<'metadata, MetadataFailure> {
+    let source_audio_files: Vec<ObservedSourceFile<'_>> = inventory
+        .files()
+        .filter(|file| classify_source_audio(file.path()).is_some())
+        .collect();
+
     let mut collections = Vec::new();
-    let mut unevaluated_collection_handles = Vec::new();
-
     for (collection_handle, declaration) in spec.collection_declarations() {
-        if !directory_only_eligible(declaration) {
-            unevaluated_collection_handles.push(collection_handle.to_owned());
-            continue;
-        }
+        let has_configured_directories = declaration.directories.is_some();
+        let metadata_predicate: Option<MetadataSelectorPredicate> =
+            if has_metadata_selectors(declaration) {
+                Some(declaration.metadata_selector_predicate())
+            } else {
+                None
+            };
 
-        let members: Vec<PathBuf> = inventory
-            .files()
-            .filter(|observed_file| classify_source_audio(observed_file.path()).is_some())
-            .filter(|observed_file| {
-                file_reported_by_configured_scope(observed_file, collection_handle)
-            })
-            .map(|observed_file| observed_file.path().to_path_buf())
-            .collect();
+        let mut collection_members = Vec::new();
+        let mut unresolved = Vec::new();
+        for file in source_audio_files
+            .iter()
+            .filter(|file| file_in_domain(file, collection_handle, has_configured_directories))
+        {
+            let path = file.path();
+            // for this collection, does this file it's found under contain metadata selector
+            // predicates?
+            match &metadata_predicate {
+                // no
+                // directory-only declarations include every in-domain file
+                None => collection_members.push(path.to_path_buf()),
+                // yes
+                // are there observations relevant to the file?
+                Some(predicate) => match metadata_extraction_outcomes.get(path) {
+                    // yes, and the observation family is valid
+                    Some(Ok(observation)) => {
+                        // the observations match the predicates, therefore this file
+                        // is a valid member of this collection
+                        if observation_matches_predicate(observation, predicate) {
+                            collection_members.push(path.to_path_buf());
+                        }
+                    }
+                    // yes, but the observation was a failure. record the reason of failure
+                    Some(Err(failure)) => unresolved.push(UnresolvedMembership {
+                        path: path.to_path_buf(),
+                        reason: UnresolvedMetadataReason::Failed(failure),
+                    }),
+                    // no. record membership unresolved due to unable to access metadata
+                    None => unresolved.push(UnresolvedMembership {
+                        path: path.to_path_buf(),
+                        reason: UnresolvedMetadataReason::Unavailable,
+                    }),
+                },
+            }
+        }
 
         collections.push(CollectionMembers {
             collection_handle: collection_handle.to_owned(),
-            members,
+            members: collection_members,
+            unresolved,
         });
+        // proceed to next collection
     }
 
-    CollectionMembership {
-        collections,
-        unevaluated_collection_handles,
-    }
+    CollectionMembership { collections }
 }
 
-/// Whether directory-only membership may evaluate `declaration`.
-fn directory_only_eligible(declaration: &CollectionDeclaration) -> bool {
-    declaration.album_names.is_none()
-        && declaration.album_artists.is_none()
-        && declaration.track_artists.is_none()
+/// Whether `collection_declaration` has at least one metadata selector.
+fn has_metadata_selectors(collection_declaration: &CollectionDeclaration) -> bool {
+    collection_declaration.album_names.is_some()
+        || collection_declaration.album_artists.is_some()
+        || collection_declaration.track_artists.is_some()
 }
 
-/// Whether a configured directory scope for `collection_handle` reported `file`.
+/// Whether `file` is in `collection_handle`'s domain according to its reporting
+/// scopes.
 ///
-/// Reporting by the default source-root scope does not satisfy this check.
-/// A matching configured scope alone does not establish membership, which also
-/// requires source-audio recognition.
-fn file_reported_by_configured_scope(
+/// A collection with directory selectors uses only its configured scopes.
+/// Without them, the default source-root scope must list its handle. Another
+/// collection's scope does not qualify merely because its resolved root is
+/// equal or its path overlaps.
+#[allow(clippy::needless_return)] // explicit returns highlight closure exit
+// paths within nested branches
+fn file_in_domain(
     file: &ObservedSourceFile<'_>,
     collection_handle: &str,
+    has_configured_directories: bool,
 ) -> bool {
-    file.reporting_scopes().any(|scope| match scope {
-        RequiredScope::ConfiguredDirectory {
-            collection_handle: scope_collection_handle,
+    file.reporting_scopes().any(|required_scope| {
+        if has_configured_directories {
+            // only this collection's own configured scope qualifies
+            if let RequiredScope::ConfiguredDirectory {
+                collection_handle: scope_handle,
+                ..
+            } = required_scope
+            {
+                return scope_handle.as_str() == collection_handle;
+            } else {
+                return false;
+            }
+        } else if let RequiredScope::DefaultSourceRoot {
+            dependent_collection_handles,
             ..
-        } => scope_collection_handle == collection_handle,
-        RequiredScope::DefaultSourceRoot { .. } => false,
+        } = required_scope
+        {
+            // only the shared default root that lists this handle qualifies
+            return dependent_collection_handles
+                .iter()
+                .any(|dependent_handle| dependent_handle.as_str() == collection_handle);
+        } else {
+            return false;
+        }
     })
 }
 
@@ -152,28 +273,134 @@ mod tests {
     use crate::test_support::{
         SourceTreeSnapshot, TempSandbox, canonical, create_source, parse_spec,
     };
+    use std::collections::BTreeSet;
     use std::fs;
-    use std::path::Path;
 
-    /// Builds a completed observed source file inventory and derives membership.
-    fn membership_for(spec: &LibraryBuildSpec, source: &Path) -> CollectionMembership {
+    /// Builds a completed source-file inventory and evaluates membership.
+    fn membership_for<'metadata, MetadataFailure>(
+        spec: &LibraryBuildSpec,
+        source: &Path,
+        metadata_extraction_outcomes: &'metadata MetadataExtractionOutcomes<MetadataFailure>,
+    ) -> CollectionMembership<'metadata, MetadataFailure> {
         let success =
             build_observed_source_file_inventory(spec, source).expect("inventory must succeed");
-        directory_only_membership(spec, success.inventory())
+        evaluate_collection_membership(spec, success.inventory(), metadata_extraction_outcomes)
     }
 
-    /// Returns the sorted members of `collection_handle`, which must be evaluated.
-    ///
-    /// Sorting keeps assertions independent of unspecified member order.
-    fn sorted_members(membership: &CollectionMembership, collection_handle: &str) -> Vec<PathBuf> {
-        let collection = membership
+    /// Builds a complete observation from raw family values.
+    fn observation(
+        album_names: &[&str],
+        album_artists: &[&str],
+        track_artists: &[&str],
+    ) -> MetadataSelectorObservation {
+        fn values(items: &[&str]) -> BTreeSet<String> {
+            items.iter().map(|item| (*item).to_owned()).collect()
+        }
+        MetadataSelectorObservation::new(
+            values(album_names),
+            values(album_artists),
+            values(track_artists),
+        )
+    }
+
+    /// Returns the collection named by `collection_handle`.
+    fn collection<'a, 'metadata, MetadataFailure>(
+        membership: &'a CollectionMembership<'metadata, MetadataFailure>,
+        collection_handle: &str,
+    ) -> &'a CollectionMembers<'metadata, MetadataFailure> {
+        membership
             .collections()
             .iter()
             .find(|collection| collection.collection_handle() == collection_handle)
-            .unwrap_or_else(|| panic!("collection {collection_handle} must be evaluated"));
-        let mut members = collection.members().to_vec();
+            .unwrap_or_else(|| panic!("collection {collection_handle} must be evaluated"))
+    }
+
+    /// Returns the sorted members of `collection_handle`.
+    ///
+    /// Sorting keeps assertions independent of unspecified member order.
+    fn sorted_members<'metadata, MetadataFailure>(
+        membership: &CollectionMembership<'metadata, MetadataFailure>,
+        collection_handle: &str,
+    ) -> Vec<PathBuf> {
+        let mut members = collection(membership, collection_handle).members().to_vec();
         members.sort();
         members
+    }
+
+    /// Returns the sorted unresolved pathnames of `collection_handle`.
+    fn sorted_unresolved_paths<'metadata, MetadataFailure>(
+        membership: &CollectionMembership<'metadata, MetadataFailure>,
+        collection_handle: &str,
+    ) -> Vec<PathBuf> {
+        let mut paths = collection(membership, collection_handle)
+            .unresolved()
+            .iter()
+            .map(|entry| entry.path().to_path_buf())
+            .collect::<Vec<_>>();
+        paths.sort();
+        paths
+    }
+
+    /// Returns the reason recorded for `path` in `collection_handle`.
+    fn reason_for<'a, 'metadata, MetadataFailure>(
+        membership: &'a CollectionMembership<'metadata, MetadataFailure>,
+        collection_handle: &str,
+        path: &Path,
+    ) -> &'a UnresolvedMetadataReason<'metadata, MetadataFailure> {
+        collection(membership, collection_handle)
+            .unresolved()
+            .iter()
+            .find(|entry| entry.path() == path)
+            .unwrap_or_else(|| {
+                panic!(
+                    "{} must be unresolved in {collection_handle}",
+                    path.display()
+                )
+            })
+            .reason()
+    }
+
+    /// Escapes `path` for use as a TOML basic string.
+    fn toml_string(path: &Path) -> String {
+        let mut escaped = String::from("\"");
+        for character in path.display().to_string().chars() {
+            match character {
+                '\\' => escaped.push_str("\\\\"),
+                '"' => escaped.push_str("\\\""),
+                character if character.is_control() => {
+                    escaped.push_str(&format!("\\u{:04X}", character as u32));
+                }
+                character => escaped.push(character),
+            }
+        }
+        escaped.push('"');
+        escaped
+    }
+
+    #[test]
+    fn directory_only_membership_ignores_supplied_metadata_and_stays_complete() {
+        let sandbox = TempSandbox::new();
+        let source = create_source(&sandbox);
+        let album = source.join("Album");
+        fs::create_dir(&album).expect("create album");
+        fs::write(album.join("one.flac"), b"one").expect("write first track");
+        fs::write(album.join("two.flac"), b"two").expect("write second track");
+        let spec = parse_spec("[collections.dir]\ndirectory = \"Album\"\n");
+
+        let one = canonical(&album).join("one.flac");
+        let two = canonical(&album).join("two.flac");
+        let mut metadata_extraction_outcomes: MetadataExtractionOutcomes<String> = HashMap::new();
+        metadata_extraction_outcomes.insert(one.clone(), Err("failure".to_owned()));
+
+        let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
+
+        assert_eq!(membership.collections().len(), 1);
+        assert!(membership.is_complete());
+        assert!(collection(&membership, "dir").is_complete());
+        let mut expected = vec![one, two];
+        expected.sort();
+        assert_eq!(sorted_members(&membership, "dir"), expected);
+        assert!(sorted_unresolved_paths(&membership, "dir").is_empty());
     }
 
     #[test]
@@ -182,7 +409,7 @@ mod tests {
         let source = create_source(&sandbox);
         let album = source.join("Fear of a Blank Planet");
         fs::create_dir_all(album.join("bonus")).expect("create album directories");
-        // the contents are not valid media, but directory-only membership does not probe them
+        // these `.flac` paths qualify even though their contents are invalid media
         fs::write(album.join("01 - Anesthetize.flac"), b"not a media file").expect("write track");
         fs::write(album.join("bonus/02 - My Ashes.FLAC"), b"").expect("write empty track");
         let spec = parse_spec(
@@ -194,9 +421,13 @@ mod tests {
         snapshot.assert_unchanged();
         let success = result.expect("inventory must succeed");
 
-        let membership = directory_only_membership(&spec, success.inventory());
+        let metadata_extraction_outcomes: MetadataExtractionOutcomes<()> = HashMap::new();
+        let membership = evaluate_collection_membership(
+            &spec,
+            success.inventory(),
+            &metadata_extraction_outcomes,
+        );
 
-        assert!(membership.unevaluated_collection_handles().is_empty());
         let mut expected = vec![
             canonical(&album).join("01 - Anesthetize.flac"),
             canonical(&album).join("bonus/02 - My Ashes.FLAC"),
@@ -226,7 +457,8 @@ mod tests {
         }
         let spec = parse_spec("[collections.tool]\ndirectory = \"Album\"\n");
 
-        let membership = membership_for(&spec, &source);
+        let metadata_extraction_outcomes: MetadataExtractionOutcomes<()> = HashMap::new();
+        let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
 
         assert_eq!(
             sorted_members(&membership, "tool"),
@@ -251,7 +483,8 @@ mod tests {
             "[collections.collection]\ndirectories = [\"disc one\", \"disc two\", \"disc one/nested\"]\n",
         );
 
-        let membership = membership_for(&spec, &source);
+        let metadata_extraction_outcomes: MetadataExtractionOutcomes<()> = HashMap::new();
+        let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
 
         let mut expected = vec![
             canonical(&one).join("01.flac"),
@@ -280,12 +513,9 @@ mod tests {
              [collections.alpha]\ndirectories = [\"shared\", \"alpha-only\"]\n",
         ] {
             let spec = parse_spec(declarations);
-            let membership = membership_for(&spec, &source);
+            let metadata_extraction_outcomes: MetadataExtractionOutcomes<()> = HashMap::new();
+            let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
 
-            assert!(
-                membership.unevaluated_collection_handles().is_empty(),
-                "declarations: {declarations}"
-            );
             let mut alpha_members = vec![
                 canonical(&shared).join("shared.flac"),
                 canonical(&alpha_only).join("alpha.flac"),
@@ -305,7 +535,7 @@ mod tests {
     }
 
     #[test]
-    fn covered_directory_scopes_without_source_audio_yield_empty_membership() {
+    fn covered_directory_scopes_without_source_audio_yield_complete_empty_membership() {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let empty = source.join("empty");
@@ -318,9 +548,10 @@ mod tests {
              [collections.non-audio]\ndirectory = \"non-audio\"\n",
         );
 
-        let membership = membership_for(&spec, &source);
+        let metadata_extraction_outcomes: MetadataExtractionOutcomes<()> = HashMap::new();
+        let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
 
-        assert!(membership.unevaluated_collection_handles().is_empty());
+        assert!(membership.is_complete());
         assert_eq!(membership.collections().len(), 2);
         assert_eq!(sorted_members(&membership, "empty"), Vec::<PathBuf>::new());
         assert_eq!(
@@ -330,172 +561,402 @@ mod tests {
     }
 
     #[test]
-    fn metadata_selector_declarations_stay_unevaluated() {
+    fn metadata_only_domain_is_the_default_root_not_every_inventory_file() {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
-        for name in [
-            "pure",
-            "with-album-name",
-            "with-album-names",
-            "with-album-artist",
-            "with-album-artists",
-            "with-track-artist",
-            "with-track-artists",
-            "empty-album-name",
-            "empty-track-artists",
-        ] {
-            let directory = source.join(name);
-            fs::create_dir(&directory).expect("create collection directory");
-            fs::write(directory.join("track.flac"), b"audio").expect("write track");
-        }
-        let spec = parse_spec(
-            "[collections.pure]\ndirectory = \"pure\"\n\
-             [collections.with-album-name]\nalbum_name = \"Named\"\ndirectory = \"with-album-name\"\n\
-             [collections.with-album-names]\nalbum_names = [\"Named\", \"Other\"]\ndirectory = \"with-album-names\"\n\
-             [collections.with-album-artist]\nalbum_artist = \"Artist\"\ndirectory = \"with-album-artist\"\n\
-             [collections.with-album-artists]\nalbum_artists = [\"Artist\"]\ndirectory = \"with-album-artists\"\n\
-             [collections.with-track-artist]\ntrack_artist = \"Artist\"\ndirectory = \"with-track-artist\"\n\
-             [collections.with-track-artists]\ntrack_artists = [\"Artist\", \"Other\"]\ndirectory = \"with-track-artists\"\n\
-             [collections.empty-album-name]\nalbum_name = \"\"\ndirectory = \"empty-album-name\"\n\
-             [collections.empty-track-artists]\ntrack_artists = [\"\"]\ndirectory = \"empty-track-artists\"\n",
-        );
+        fs::write(source.join("local.flac"), b"local").expect("write local track");
+        let outside = sandbox.path().join("outside");
+        fs::create_dir(&outside).expect("create outside directory");
+        fs::write(outside.join("foreign.flac"), b"foreign").expect("write foreign track");
+        let spec = parse_spec(&format!(
+            "[collections.configured]\ndirectory = {}\n\
+             [collections.meta]\nalbum_name = \"Keep\"\n",
+            toml_string(&outside)
+        ));
 
-        let membership = membership_for(&spec, &source);
+        let local = canonical(&source).join("local.flac");
+        let foreign = canonical(&outside).join("foreign.flac");
+        let mut metadata_extraction_outcomes: MetadataExtractionOutcomes<()> = HashMap::new();
+        metadata_extraction_outcomes.insert(local.clone(), Ok(observation(&["Keep"], &[], &[])));
+        // a matching outcome outside the default-root scope must not widen the domain
+        metadata_extraction_outcomes.insert(foreign.clone(), Ok(observation(&["Keep"], &[], &[])));
 
-        let expected_unevaluated: Vec<String> = [
-            "with-album-name",
-            "with-album-names",
-            "with-album-artist",
-            "with-album-artists",
-            "with-track-artist",
-            "with-track-artists",
-            "empty-album-name",
-            "empty-track-artists",
-        ]
-        .map(str::to_owned)
-        .to_vec();
-        assert_eq!(
-            membership.unevaluated_collection_handles(),
-            expected_unevaluated
-        );
-        assert_eq!(membership.collections().len(), 1);
-        assert_eq!(membership.collections()[0].collection_handle(), "pure");
+        let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
 
-        // Filtered handles are absent from evaluated results, not empty
-        // evaluated collections.
-        for handle in [
-            "with-album-name",
-            "with-album-names",
-            "with-album-artist",
-            "with-album-artists",
-            "with-track-artist",
-            "with-track-artists",
-            "empty-album-name",
-            "empty-track-artists",
-        ] {
-            assert!(
-                membership
-                    .collections()
-                    .iter()
-                    .all(|collection| collection.collection_handle() != handle),
-                "filtered handle {handle} must not appear as an evaluated collection"
-            );
-        }
-
-        // these files are reported only by other declarations' configured directory
-        // scopes, so they are not members of `pure`
-        let pure_members = sorted_members(&membership, "pure");
-        assert_eq!(
-            pure_members,
-            vec![canonical(&source.join("pure")).join("track.flac")]
-        );
-        for handle in [
-            "with-album-name",
-            "with-album-names",
-            "with-album-artist",
-            "with-album-artists",
-            "with-track-artist",
-            "with-track-artists",
-            "empty-album-name",
-            "empty-track-artists",
-        ] {
-            let selector_prefix = canonical(&source.join(handle));
-            assert!(
-                pure_members
-                    .iter()
-                    .all(|member| !member.starts_with(&selector_prefix)),
-                "file reported only by {handle}'s configured scope must not be a member of pure"
-            );
-        }
+        assert_eq!(sorted_members(&membership, "meta"), vec![local]);
+        assert!(collection(&membership, "meta").is_complete());
+        assert_eq!(sorted_members(&membership, "configured"), vec![foreign]);
     }
 
     #[test]
-    fn default_scope_dependents_stay_unevaluated() {
-        let sandbox = TempSandbox::new();
-        let source = create_source(&sandbox);
-        let collection = source.join("collection");
-        fs::create_dir(&collection).expect("create collection directory");
-        fs::write(collection.join("configured.flac"), b"configured")
-            .expect("write configured track");
-        fs::write(source.join("root-only.flac"), b"root").expect("write default-root track");
-        let spec = parse_spec(
-            "[collections.configured]\ndirectory = \"collection\"\n\
-             [collections.default-album-name]\nalbum_name = \"Named\"\n\
-             [collections.default-album-artist]\nalbum_artist = \"\"\n\
-             [collections.default-track-artist]\ntrack_artists = [\"Artist\"]\n",
-        );
-
-        let membership = membership_for(&spec, &source);
-
-        let expected_unevaluated: Vec<String> = [
-            "default-album-name",
-            "default-album-artist",
-            "default-track-artist",
-        ]
-        .map(str::to_owned)
-        .to_vec();
-        assert_eq!(
-            membership.unevaluated_collection_handles(),
-            expected_unevaluated
-        );
-        assert_eq!(membership.collections().len(), 1);
-        assert_eq!(
-            membership.collections()[0].collection_handle(),
-            "configured"
-        );
-        // The shared default-root scope does not contribute to any evaluated
-        // collection. Only the configured directory scope contributes.
-        assert_eq!(
-            sorted_members(&membership, "configured"),
-            vec![canonical(&collection).join("configured.flac")]
-        );
-    }
-
-    #[test]
-    fn inventory_pathnames_stay_distinct_and_keep_their_spelling() {
+    fn directory_plus_metadata_is_an_intersection_gating_each_in_domain_file() {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let album = source.join("Album");
-        fs::create_dir_all(album.join("disc 1")).expect("create disc 1");
-        fs::create_dir_all(album.join("disc 2")).expect("create disc 2");
-        fs::write(album.join("disc 1/01 - Song (Live).flac"), b"one").expect("write disc 1 track");
-        fs::write(album.join("disc 2/01 - Song (Live).flac"), b"two").expect("write disc 2 track");
-        fs::write(album.join("Björk - Homogenic.flac"), b"unicode").expect("write unicode track");
-        let spec = parse_spec("[collections.tool]\ndirectory = \"Album\"\n");
+        let other = source.join("Other");
+        fs::create_dir(&album).expect("create album");
+        fs::create_dir(&other).expect("create other");
+        fs::write(album.join("keep.flac"), b"keep").expect("write keep");
+        fs::write(album.join("drop.flac"), b"drop").expect("write drop");
+        fs::write(other.join("elsewhere.flac"), b"elsewhere").expect("write elsewhere");
+        let spec = parse_spec(
+            "[collections.combined]\ndirectory = \"Album\"\nalbum_name = \"Keep\"\n\
+             [collections.other]\ndirectory = \"Other\"\n",
+        );
 
-        let membership = membership_for(&spec, &source);
+        let keep = canonical(&album).join("keep.flac");
+        let drop = canonical(&album).join("drop.flac");
+        let elsewhere = canonical(&other).join("elsewhere.flac");
+        let mut metadata_extraction_outcomes: MetadataExtractionOutcomes<()> = HashMap::new();
+        metadata_extraction_outcomes.insert(keep.clone(), Ok(observation(&["Keep"], &[], &[])));
+        metadata_extraction_outcomes.insert(drop.clone(), Ok(observation(&["Other"], &[], &[])));
+        // this match is reported only by the other collection's configured scope
+        metadata_extraction_outcomes
+            .insert(elsewhere.clone(), Ok(observation(&["Keep"], &[], &[])));
 
-        let mut expected = vec![
-            canonical(&album).join("disc 1/01 - Song (Live).flac"),
-            canonical(&album).join("disc 2/01 - Song (Live).flac"),
-            canonical(&album).join("Björk - Homogenic.flac"),
-        ];
-        expected.sort();
-        assert_eq!(sorted_members(&membership, "tool"), expected);
+        let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
+
+        assert_eq!(sorted_members(&membership, "combined"), vec![keep]);
+        // `drop` has a successful nonmatch, so it is a resolved non-member
+        assert!(sorted_unresolved_paths(&membership, "combined").is_empty());
+        assert!(collection(&membership, "combined").is_complete());
+        assert!(!sorted_members(&membership, "combined").contains(&elsewhere));
+        assert_eq!(sorted_members(&membership, "other"), vec![elsewhere]);
     }
 
     #[test]
-    fn membership_construction_does_not_mutate_the_source_tree() {
+    fn directory_declarations_do_not_acquire_default_root_coverage() {
+        let sandbox = TempSandbox::new();
+        let source = create_source(&sandbox);
+        let album = source.join("Album");
+        fs::create_dir(&album).expect("create album");
+        fs::write(album.join("track.flac"), b"track").expect("write track");
+        fs::write(source.join("root.flac"), b"root").expect("write root track");
+        let spec = parse_spec(
+            "[collections.dir]\ndirectory = \"Album\"\n\
+             [collections.meta]\nalbum_name = \"Keep\"\n",
+        );
+
+        let track = canonical(&album).join("track.flac");
+        let root = canonical(&source).join("root.flac");
+        let mut metadata_extraction_outcomes: MetadataExtractionOutcomes<()> = HashMap::new();
+        metadata_extraction_outcomes.insert(root.clone(), Ok(observation(&["Keep"], &[], &[])));
+
+        let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
+
+        // `track` is reported by both scopes. `dir` uses its configured scope,
+        // while `meta` uses the default-root association, where `track` has no
+        // outcome
+        assert_eq!(sorted_members(&membership, "dir"), vec![track.clone()]);
+        assert!(collection(&membership, "dir").is_complete());
+        assert!(!sorted_members(&membership, "dir").contains(&root));
+
+        assert_eq!(sorted_members(&membership, "meta"), vec![root]);
+        assert_eq!(sorted_unresolved_paths(&membership, "meta"), vec![track]);
+    }
+
+    #[test]
+    fn metadata_evaluation_establishes_members_and_implicit_non_members() {
+        let sandbox = TempSandbox::new();
+        let source = create_source(&sandbox);
+        fs::write(source.join("match.flac"), b"match").expect("write match");
+        fs::write(source.join("miss.flac"), b"miss").expect("write miss");
+        fs::write(source.join("absent.flac"), b"absent").expect("write absent");
+        let spec = parse_spec("[collections.meta]\nalbum_name = \"Keep\"\n");
+
+        let matched = canonical(&source).join("match.flac");
+        let mismatched = canonical(&source).join("miss.flac");
+        let absent = canonical(&source).join("absent.flac");
+        let mut metadata_extraction_outcomes: MetadataExtractionOutcomes<()> = HashMap::new();
+        metadata_extraction_outcomes.insert(matched.clone(), Ok(observation(&["Keep"], &[], &[])));
+        metadata_extraction_outcomes
+            .insert(mismatched.clone(), Ok(observation(&["Other"], &[], &[])));
+
+        let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
+
+        assert_eq!(sorted_members(&membership, "meta"), vec![matched]);
+        assert_eq!(sorted_unresolved_paths(&membership, "meta"), vec![absent]);
+        assert!(!sorted_members(&membership, "meta").contains(&mismatched));
+    }
+
+    #[test]
+    fn missing_outcomes_are_unavailable_and_failures_borrow_the_supplied_payload() {
+        let sandbox = TempSandbox::new();
+        let source = create_source(&sandbox);
+        fs::write(source.join("failed.flac"), b"failed").expect("write failed");
+        fs::write(source.join("absent.flac"), b"absent").expect("write absent");
+        let spec = parse_spec("[collections.meta]\nalbum_name = \"Keep\"\n");
+
+        let failed = canonical(&source).join("failed.flac");
+        let absent = canonical(&source).join("absent.flac");
+        let mut metadata_extraction_outcomes: MetadataExtractionOutcomes<String> = HashMap::new();
+        metadata_extraction_outcomes.insert(failed.clone(), Err("extraction failed".to_owned()));
+        let stored = match metadata_extraction_outcomes
+            .get(&failed)
+            .expect("failure entry must exist")
+        {
+            Err(payload) => payload,
+            Ok(_) => unreachable!("the test entry is a failure"),
+        };
+
+        let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
+
+        match reason_for(&membership, "meta", &failed) {
+            UnresolvedMetadataReason::Failed(payload) => assert!(
+                std::ptr::eq(*payload, stored),
+                "membership must borrow the exact supplied failure payload"
+            ),
+            UnresolvedMetadataReason::Unavailable => {
+                panic!("a supplied failure must stay a failure")
+            }
+        }
+        assert!(matches!(
+            reason_for(&membership, "meta", &absent),
+            UnresolvedMetadataReason::Unavailable
+        ));
+        assert!(!membership.is_complete());
+    }
+
+    #[test]
+    fn every_declaration_is_represented_with_derived_completeness() {
+        let sandbox = TempSandbox::new();
+        let source = create_source(&sandbox);
+        let album = source.join("Album");
+        let empty = source.join("Empty");
+        fs::create_dir(&album).expect("create album");
+        fs::create_dir(&empty).expect("create empty");
+        fs::write(album.join("track.flac"), b"track").expect("write track");
+        fs::write(empty.join("notes.txt"), b"notes").expect("write notes");
+        let spec = parse_spec(
+            "[collections.dir]\ndirectory = \"Album\"\n\
+             [collections.meta]\nalbum_name = \"Keep\"\n\
+             [collections.combined]\ndirectory = \"Album\"\nalbum_name = \"Keep\"\n\
+             [collections.empty]\ndirectory = \"Empty\"\n",
+        );
+
+        let track = canonical(&album).join("track.flac");
+        let mut metadata_extraction_outcomes: MetadataExtractionOutcomes<()> = HashMap::new();
+        metadata_extraction_outcomes.insert(track.clone(), Ok(observation(&["Keep"], &[], &[])));
+
+        let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
+
+        let handles: Vec<&str> = membership
+            .collections()
+            .iter()
+            .map(CollectionMembers::collection_handle)
+            .collect();
+        assert_eq!(handles, ["dir", "meta", "combined", "empty"]);
+        assert!(membership.is_complete());
+        assert_eq!(sorted_members(&membership, "dir"), vec![track.clone()]);
+        assert_eq!(sorted_members(&membership, "meta"), vec![track.clone()]);
+        assert_eq!(sorted_members(&membership, "combined"), vec![track.clone()]);
+        assert_eq!(sorted_members(&membership, "empty"), Vec::<PathBuf>::new());
+        assert!(collection(&membership, "empty").is_complete());
+
+        // without the outcome, metadata-dependent collections are incomplete,
+        // while directory-only collections remain complete
+        let without_outcome: MetadataExtractionOutcomes<()> = HashMap::new();
+        let membership = membership_for(&spec, &source, &without_outcome);
+        assert!(!membership.is_complete());
+        assert!(collection(&membership, "dir").is_complete());
+        assert_eq!(sorted_members(&membership, "dir"), vec![track.clone()]);
+        assert_eq!(
+            sorted_unresolved_paths(&membership, "meta"),
+            vec![track.clone()]
+        );
+        assert_eq!(
+            sorted_unresolved_paths(&membership, "combined"),
+            vec![track]
+        );
+        assert!(collection(&membership, "empty").is_complete());
+    }
+
+    #[test]
+    fn successful_empty_observations_are_distinct_from_unavailability() {
+        let sandbox = TempSandbox::new();
+        let source = create_source(&sandbox);
+        fs::write(source.join("present.flac"), b"present").expect("write present");
+        fs::write(source.join("empty.flac"), b"empty").expect("write empty");
+        fs::write(source.join("absent.flac"), b"absent").expect("write absent");
+        let spec = parse_spec("[collections.meta]\nalbum_name = \"\"\n");
+
+        let present = canonical(&source).join("present.flac");
+        let empty = canonical(&source).join("empty.flac");
+        let absent = canonical(&source).join("absent.flac");
+        let mut metadata_extraction_outcomes: MetadataExtractionOutcomes<()> = HashMap::new();
+        // a present empty album name matches the empty-string predicate
+        metadata_extraction_outcomes.insert(present.clone(), Ok(observation(&[""], &[], &[])));
+        // three empty families are a successful observation but contain no
+        // value matching the empty-string predicate
+        metadata_extraction_outcomes.insert(empty.clone(), Ok(observation(&[], &[], &[])));
+
+        let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
+
+        assert_eq!(sorted_members(&membership, "meta"), vec![present]);
+        assert!(!sorted_members(&membership, "meta").contains(&empty));
+        assert!(matches!(
+            reason_for(&membership, "meta", &absent),
+            UnresolvedMetadataReason::Unavailable
+        ));
+        assert_eq!(sorted_unresolved_paths(&membership, "meta"), vec![absent]);
+    }
+
+    #[test]
+    fn extra_metadata_entries_widen_neither_domain_nor_files() {
+        let sandbox = TempSandbox::new();
+        let source = create_source(&sandbox);
+        fs::write(source.join("local.flac"), b"local").expect("write local");
+        let outside = sandbox.path().join("outside");
+        fs::create_dir(&outside).expect("create outside directory");
+        fs::write(outside.join("foreign.flac"), b"foreign").expect("write foreign");
+        let spec = parse_spec(&format!(
+            "[collections.configured]\ndirectory = {}\n\
+             [collections.meta]\nalbum_name = \"Keep\"\n",
+            toml_string(&outside)
+        ));
+
+        let local = canonical(&source).join("local.flac");
+        let foreign = canonical(&outside).join("foreign.flac");
+        let ghost = canonical(&source).join("ghost.flac");
+        let mut metadata_extraction_outcomes: MetadataExtractionOutcomes<String> = HashMap::new();
+        metadata_extraction_outcomes.insert(local.clone(), Ok(observation(&["Keep"], &[], &[])));
+        // `ghost` is absent from the inventory, and `foreign` is outside
+        // `meta`'s domain. Neither outcome affects `meta`
+        metadata_extraction_outcomes.insert(ghost, Err("ghost".to_owned()));
+        metadata_extraction_outcomes.insert(foreign, Err("irrelevant".to_owned()));
+
+        let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
+
+        assert_eq!(sorted_members(&membership, "meta"), vec![local]);
+        assert!(sorted_unresolved_paths(&membership, "meta").is_empty());
+        assert!(collection(&membership, "meta").is_complete());
+    }
+
+    #[test]
+    fn native_pathname_equality_preserves_inventory_spelling() {
+        let sandbox = TempSandbox::new();
+        let source = create_source(&sandbox);
+        fs::write(source.join("track.flac"), b"track").expect("write track");
+        fs::write(source.join("failed.flac"), b"failed").expect("write failed");
+        let spec = parse_spec("[collections.meta]\nalbum_name = \"Keep\"\n");
+
+        let track = canonical(&source).join("track.flac");
+        let failed = canonical(&source).join("failed.flac");
+        // these keys differ textually but compare equal as `Path`s. Lookup
+        // must match them, while results retain the inventory spelling
+        let track_key = canonical(&source).join(".").join("track.flac");
+        let failed_key = canonical(&source).join(".").join("failed.flac");
+        assert_ne!(track.as_os_str(), track_key.as_os_str());
+        assert_ne!(failed.as_os_str(), failed_key.as_os_str());
+        assert_eq!(track, track_key);
+        assert_eq!(failed, failed_key);
+
+        let mut metadata_extraction_outcomes: MetadataExtractionOutcomes<String> = HashMap::new();
+        metadata_extraction_outcomes.insert(track_key, Ok(observation(&["Keep"], &[], &[])));
+        metadata_extraction_outcomes.insert(failed_key, Err("nope".to_owned()));
+
+        let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
+
+        let members = sorted_members(&membership, "meta");
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].as_os_str(), track.as_os_str());
+        let unresolved = sorted_unresolved_paths(&membership, "meta");
+        assert_eq!(unresolved.len(), 1);
+        assert_eq!(unresolved[0].as_os_str(), failed.as_os_str());
+    }
+
+    #[test]
+    fn explicit_empty_unit_outcomes_are_valid() {
+        let sandbox = TempSandbox::new();
+        let source = create_source(&sandbox);
+        let album = source.join("Album");
+        fs::create_dir(&album).expect("create album");
+        fs::write(album.join("track.flac"), b"track").expect("write track");
+        let spec = parse_spec(
+            "[collections.dir]\ndirectory = \"Album\"\n\
+             [collections.meta]\nalbum_name = \"Keep\"\n",
+        );
+
+        let track = canonical(&album).join("track.flac");
+        let metadata_extraction_outcomes: MetadataExtractionOutcomes<()> = HashMap::new();
+
+        let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
+
+        assert_eq!(sorted_members(&membership, "dir"), vec![track.clone()]);
+        assert!(collection(&membership, "dir").is_complete());
+        assert_eq!(sorted_unresolved_paths(&membership, "meta"), vec![track]);
+        assert!(!membership.is_complete());
+    }
+
+    #[test]
+    fn evaluation_imposes_no_trait_bounds_on_the_opaque_payload() {
+        struct Opaque {
+            marker: u32,
+        }
+
+        let sandbox = TempSandbox::new();
+        let source = create_source(&sandbox);
+        fs::write(source.join("track.flac"), b"track").expect("write track");
+        let spec = parse_spec("[collections.meta]\nalbum_name = \"Keep\"\n");
+
+        let track = canonical(&source).join("track.flac");
+        let mut metadata_extraction_outcomes: MetadataExtractionOutcomes<Opaque> = HashMap::new();
+        metadata_extraction_outcomes.insert(track.clone(), Err(Opaque { marker: 7 }));
+        let stored = match metadata_extraction_outcomes
+            .get(&track)
+            .expect("failure entry must exist")
+        {
+            Err(payload) => payload,
+            Ok(_) => unreachable!("the test entry is a failure"),
+        };
+
+        let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
+
+        match reason_for(&membership, "meta", &track) {
+            UnresolvedMetadataReason::Failed(payload) => {
+                assert!(std::ptr::eq(*payload, stored));
+                assert_eq!(payload.marker, 7);
+            }
+            UnresolvedMetadataReason::Unavailable => {
+                panic!("expected the supplied failure")
+            }
+        }
+    }
+
+    #[test]
+    fn metadata_only_collections_for_each_selector_family_are_evaluated() {
+        let sandbox = TempSandbox::new();
+        let source = create_source(&sandbox);
+        fs::write(source.join("named.flac"), b"named").expect("write named");
+        fs::write(source.join("artist.flac"), b"artist").expect("write artist");
+        fs::write(source.join("other.flac"), b"other").expect("write other");
+        let spec = parse_spec(
+            "[collections.by-name]\nalbum_name = \"Album\"\n\
+             [collections.by-artist]\nalbum_artists = [\"Artist\"]\n\
+             [collections.by-track]\ntrack_artists = [\"Performer\"]\n",
+        );
+
+        let named = canonical(&source).join("named.flac");
+        let artist = canonical(&source).join("artist.flac");
+        let other = canonical(&source).join("other.flac");
+        let mut metadata_extraction_outcomes: MetadataExtractionOutcomes<()> = HashMap::new();
+        metadata_extraction_outcomes.insert(named.clone(), Ok(observation(&["Album"], &[], &[])));
+        metadata_extraction_outcomes.insert(artist.clone(), Ok(observation(&[], &["Artist"], &[])));
+        metadata_extraction_outcomes.insert(other.clone(), Ok(observation(&[], &[], &[])));
+
+        let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
+
+        assert_eq!(sorted_members(&membership, "by-name"), vec![named]);
+        assert_eq!(sorted_members(&membership, "by-artist"), vec![artist]);
+        assert_eq!(
+            sorted_members(&membership, "by-track"),
+            Vec::<PathBuf>::new()
+        );
+        assert!(membership.is_complete());
+    }
+
+    #[test]
+    fn membership_evaluation_does_not_mutate_the_source_tree() {
         let sandbox = TempSandbox::new();
         let source = create_source(&sandbox);
         let album = source.join("Album");
@@ -512,7 +973,12 @@ mod tests {
         snapshot.assert_unchanged();
         let success = result.expect("inventory must succeed");
 
-        let membership = directory_only_membership(&spec, success.inventory());
+        let metadata_extraction_outcomes: MetadataExtractionOutcomes<()> = HashMap::new();
+        let membership = evaluate_collection_membership(
+            &spec,
+            success.inventory(),
+            &metadata_extraction_outcomes,
+        );
         snapshot.assert_unchanged();
 
         assert_eq!(

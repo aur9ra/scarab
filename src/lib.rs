@@ -26,9 +26,12 @@
 //! if any. `required_discovery` scans prepared scopes, and
 //! [`build_observed_source_file_inventory`]
 //! combines scope preparation with required discovery into a completed observed
-//! source file inventory. The private `collection_membership` module derives
-//! directory-only membership from that inventory for declarations without
-//! metadata selectors.
+//! source file inventory. The private `collection_membership` module evaluates
+//! every declaration using that inventory and supplied reader-independent
+//! metadata outcomes. For in-domain files in metadata-dependent collections,
+//! missing outcomes are unresolved as unavailable, failures are unresolved with
+//! their supplied payload, and successful non-matches are resolved non-members.
+//! Established members remain when other files are unresolved.
 //!
 //! [`classify_source_audio`] recognizes Scarab's source-audio formats from a
 //! supplied path's final extension. [`probe_source_file`] requests ffprobe
