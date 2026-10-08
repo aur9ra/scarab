@@ -6,7 +6,8 @@
 
 //! Parsing and validation of Scarab's TOML configuration, filesystem discovery
 //! and scope preparation, observed source file inventory, source-audio classification,
-//! ffprobe metadata probing, and directory-selector resolution.
+//! selector-metadata requirement discovery, ffprobe metadata probing, and
+//! directory-selector resolution.
 //!
 //! [`parse`] deserializes TOML text into the validated [`LibraryBuildSpec`]
 //! model or reports the first problem it finds. Ambiguity, such as a rule
@@ -26,7 +27,10 @@
 //! if any. `required_discovery` scans prepared scopes, and
 //! [`build_observed_source_file_inventory`]
 //! combines scope preparation with required discovery into a completed observed
-//! source file inventory. The private `collection_membership` module evaluates
+//! source file inventory. The private `metadata_extraction_requirements` module
+//! identifies source-audio paths whose reporting associations require selector
+//! metadata, without reading files or considering existing extraction outcomes.
+//! The private `collection_membership` module evaluates
 //! every declaration using that inventory and supplied reader-independent
 //! metadata outcomes. For in-domain files in metadata-dependent collections,
 //! missing outcomes are unresolved as unavailable, failures are unresolved with
@@ -44,6 +48,7 @@ mod collection_scope;
 mod config;
 mod directory_selector;
 mod discovery;
+mod metadata_extraction_requirements;
 mod metadata_selection;
 mod observed_source_file_inventory;
 mod probe;

@@ -345,6 +345,77 @@ mod tests {
     }
 
     #[test]
+    fn metadata_requirements_use_reporting_associations_not_equal_or_overlapping_roots() {
+        use crate::metadata_extraction_requirements::required_metadata_paths;
+        use crate::test_support::parse_spec;
+
+        let spec = parse_spec(
+            "[collections.meta]\ndirectory = \"Album\"\nalbum_name = \"Keep\"\n\
+             [collections.dir]\ndirectory = \"Album\"\n",
+        );
+        let track = PathBuf::from("/music/album/track.flac");
+        for metadata_root in ["/music/album", "/music"] {
+            let scopes = vec![
+                configured_scope("meta", metadata_root, &["Album"]),
+                configured_scope("dir", "/music/album", &["Album"]),
+            ];
+            // coverage can observe different contents at different scan times
+            let empty_files_per_scope = vec![vec![], vec![track.clone()]];
+            let inventory = aggregate_observations(scopes, empty_files_per_scope);
+            assert!(required_metadata_paths(&spec, &inventory).is_empty());
+        }
+
+        // a reported pathname qualifies even outside the scope's lexical root
+        let inventory = aggregate_observations(
+            vec![configured_scope("meta", "/elsewhere", &["Album"])],
+            vec![vec![track.clone()]],
+        );
+        assert_eq!(
+            required_metadata_paths(&spec, &inventory),
+            vec![track.as_path()]
+        );
+    }
+
+    #[test]
+    fn metadata_requirements_borrow_inventory_retained_spelling() {
+        use crate::metadata_extraction_requirements::required_metadata_paths;
+        use crate::test_support::parse_spec;
+
+        let spec = parse_spec("[collections.meta]\ndirectory = \"Album\"\nalbum_name = \"Keep\"\n");
+        let retained = PathBuf::from("/music/album/./track.FlaC");
+        let equal_spelling = PathBuf::from("/music/album/track.FlaC");
+        assert_eq!(retained, equal_spelling);
+        assert_ne!(retained.as_os_str(), equal_spelling.as_os_str());
+        let inventory = aggregate_observations(
+            vec![configured_scope("meta", "/music/album", &["Album"])],
+            vec![vec![retained.clone(), equal_spelling]],
+        );
+        let paths = required_metadata_paths(&spec, &inventory);
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].as_os_str(), retained.as_os_str());
+        assert!(std::ptr::eq(
+            paths[0],
+            inventory.files().next().unwrap().path()
+        ));
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "reporting configured-scope handle must exist in the paired build specification"
+    )]
+    fn metadata_requirements_reject_unknown_configured_handle() {
+        use crate::metadata_extraction_requirements::required_metadata_paths;
+        use crate::test_support::parse_spec;
+
+        let spec = parse_spec("[collections.meta]\nalbum_name = \"Keep\"\n");
+        let inventory = aggregate_observations(
+            vec![configured_scope("unknown", "/music", &["Album"])],
+            vec![vec![PathBuf::from("/music/track.flac")]],
+        );
+        required_metadata_paths(&spec, &inventory);
+    }
+
+    #[test]
     fn empty_scopes_stay_covered_without_observed_files() {
         let scopes = vec![
             configured_scope("one", "/music/one", &["one"]),

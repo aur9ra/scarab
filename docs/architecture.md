@@ -16,6 +16,10 @@ Source-audio classification is purely lexical: it classifies a pathname, not the
 
 An observed source file’s reporting-scope association does not by itself establish collection membership. Membership interprets reporting-scope associations together with supplied metadata predicates. Output policy separately determines what to emit and how that output is produced.
 
+Selector-metadata extraction requirement discovery interprets a paired build specification and observed inventory. It returns borrowed inventory-retained source-audio pathnames in any metadata-dependent reporting association, once each, in unspecified order. Configured scopes require selector metadata exactly when their declaration supplies a metadata selector. The shared default scope always requires it, because validated declarations without directories necessarily supply metadata selectors. The spec and inventory must come from the same specification. A configured handle missing from that spec is an internal contract violation.
+
+Requirement discovery uses actual reporting associations, not ancestry, containment, or equal roots. Metadata plus configured directories does not acquire default-root fallback. It preserves native pathname identity and retained spelling, without merging physical-file aliases. It does not reinspect the filesystem, read media, evaluate predicates or membership, or produce extraction outcomes. Requirements refer to the complete selector-metadata observation, not individual families or pending extraction work. Existing outcomes, scheduling, retries, caching, readers, and build failure or output policy remain separate concerns.
+
 A failed or incomplete observation does not by itself establish a negative result. It does not prove that a referenced path is absent from the filesystem, that an observed source file is not a member of a collection, or that a required scope would report no files if discovery completed. Resolution, discovery, classification, and probing remain independently usable capabilities, and no mandatory inventory gateway or execution pipeline is required.
 
 ## Build specifications and identity

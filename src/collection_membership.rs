@@ -44,7 +44,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::config::{CollectionDeclaration, LibraryBuildSpec};
+use crate::config::LibraryBuildSpec;
 use crate::metadata_selection::{
     MetadataSelectorObservation, MetadataSelectorPredicate, observation_matches_predicate,
 };
@@ -163,7 +163,7 @@ pub(crate) fn evaluate_collection_membership<'metadata, MetadataFailure>(
     for (collection_handle, declaration) in spec.collection_declarations() {
         let has_configured_directories = declaration.directories.is_some();
         let metadata_predicate: Option<MetadataSelectorPredicate> =
-            if has_metadata_selectors(declaration) {
+            if declaration.has_metadata_selectors() {
                 Some(declaration.metadata_selector_predicate())
             } else {
                 None
@@ -216,13 +216,6 @@ pub(crate) fn evaluate_collection_membership<'metadata, MetadataFailure>(
     }
 
     CollectionMembership { collections }
-}
-
-/// Whether `collection_declaration` has at least one metadata selector.
-fn has_metadata_selectors(collection_declaration: &CollectionDeclaration) -> bool {
-    collection_declaration.album_names.is_some()
-        || collection_declaration.album_artists.is_some()
-        || collection_declaration.track_artists.is_some()
 }
 
 /// Whether `file` is in `collection_handle`'s domain according to its reporting

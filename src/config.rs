@@ -116,6 +116,15 @@ pub struct CollectionDeclaration {
 }
 
 impl CollectionDeclaration {
+    /// Whether any selector-metadata family is supplied by the
+    /// configured collection.
+    ///
+    /// Only `Option` presence matters, empty lists in detached declarations and
+    /// empty-string alternatives are supplied selectors.
+    pub(crate) fn has_metadata_selectors(&self) -> bool {
+        self.album_names.is_some() || self.album_artists.is_some() || self.track_artists.is_some()
+    }
+
     /// Builds a compound predicate from this declaration's metadata selectors.
     ///
     /// The translation preserves `None`, empty lists, string contents, list
@@ -866,5 +875,38 @@ fn check_collection_handle_defined(
             collection_handle: collection_handle.to_owned(),
         }
         .into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn has_metadata_selectors_checks_presence_not_alternatives() {
+        let omitted = CollectionDeclaration {
+            album_names: None,
+            album_artists: None,
+            track_artists: None,
+            directories: Some(vec![PathBuf::from("Album")]),
+        };
+        assert!(!omitted.has_metadata_selectors());
+        let mut no_directories = omitted.clone();
+        no_directories.directories = None;
+        assert!(!no_directories.has_metadata_selectors());
+
+        for family in 0..3 {
+            for alternatives in [vec!["value".to_owned()], vec![], vec![String::new()]] {
+                let mut declaration = omitted.clone();
+                let selector = match family {
+                    0 => &mut declaration.album_names,
+                    1 => &mut declaration.album_artists,
+                    2 => &mut declaration.track_artists,
+                    _ => unreachable!(),
+                };
+                *selector = Some(alternatives);
+                assert!(declaration.has_metadata_selectors(), "{declaration:?}");
+            }
+        }
     }
 }
