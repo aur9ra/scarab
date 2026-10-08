@@ -21,6 +21,18 @@ jobs:
         run: cargo test --lib collection_scope
       - name: Run configuration integration tests
         run: cargo test --test config
+      # `config` alone also matches "configured" test names in other modules,
+      # so we scope the filter to the config module's test submodule.
+      - name: Run configuration unit tests
+        run: cargo test --lib config::tests
+      - name: Run metadata-selection unit tests
+        run: cargo test --lib metadata_selection
+      - name: Run VORBIS-comment projection unit tests
+        run: cargo test --lib vorbis_comments
+      - name: Run metadata-extraction-requirement unit tests
+        run: cargo test --lib metadata_extraction_requirements
+      - name: Run collection-membership unit tests
+        run: cargo test --lib collection_membership
       - name: Run source-audio classifier unit tests
         run: cargo test --lib source_audio
       - name: Run required-discovery unit tests
