@@ -6,7 +6,7 @@
 
 //! Parsing and validation of Scarab's TOML configuration, filesystem discovery
 //! and scope preparation, observed source file inventory, source-audio classification,
-//! selector-metadata requirement discovery, ffprobe metadata probing, and
+//! selector-metadata requirement discovery, ffprobe format-duration probing, and
 //! directory-selector resolution.
 //!
 //! [`parse`] deserializes TOML text into the validated [`LibraryBuildSpec`]
@@ -39,7 +39,7 @@
 //!
 //! [`classify_source_audio`] recognizes Scarab's source-audio formats from a
 //! supplied path's final extension. [`probe_source_file`] requests ffprobe
-//! format metadata for its supplied path and requires no prior classification.
+//! format duration for its supplied path and requires no prior classification.
 //! Discovery, classification, and probing are distinct capabilities. None
 //! establishes collection membership.
 

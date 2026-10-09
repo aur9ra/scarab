@@ -9,7 +9,6 @@
 //! Every probed path lives under a disposable copy of the committed fixture
 //! library, so ffprobe is never given a committed fixture path during testing.
 
-use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
@@ -19,79 +18,33 @@ mod common;
 
 use common::{SourceFileSnapshot, TempSandbox, copy_fixture_library};
 
-/// One fixture row is: the path relative to the committed fixture library,
-/// the exact duration ffprobe reports, and the tag map ffprobe reports.
-type FixtureRow = (
-    &'static str,
-    Duration,
-    &'static [(&'static str, &'static str)],
-);
+/// One fixture row is: the path relative to the committed fixture library
+/// and the exact duration ffprobe reports.
+type FixtureRow = (&'static str, Duration);
 
 /// One row per committed fixture.
 const FIXTURES: &[FixtureRow] = &[
     (
         "album-one/01-flamenco-road.flac",
         Duration::from_nanos(46_419_592_000),
-        &[
-            ("ALBUM", "Fixture Album One"),
-            ("album_artist", "Fixture Artist One"),
-            ("ARTIST", "Fixture Artist One"),
-            ("TITLE", "Flamenco Road"),
-            ("track", "1"),
-        ],
     ),
     (
         "album-one/02-blackbird.flac",
         Duration::from_nanos(4_239_751_000),
-        &[
-            ("ALBUM", "Fixture Album One"),
-            ("album_artist", "Fixture Artist One"),
-            ("ARTIST", "Fixture Artist One"),
-            ("TITLE", "Blackbird"),
-            ("track", "2"),
-        ],
     ),
     (
         "album-one/03-minuet.flac",
         Duration::from_nanos(52_273_542_000),
-        &[
-            ("ALBUM", "Fixture Album One"),
-            ("album_artist", "Fixture Artist One"),
-            ("ARTIST", "Fixture Artist One"),
-            ("TITLE", "Minuet in G Major"),
-            ("track", "3"),
-        ],
     ),
     (
         "album-two/01-hans-im-schnokeloch.flac",
         Duration::from_nanos(19_000_000_000),
-        &[
-            ("ALBUM", "Fixture Album Two"),
-            ("album_artist", "Fixture Artist Two"),
-            ("ARTIST", "Fixture Artist Two"),
-            ("TITLE", "D'r Hans im Schnokeloch"),
-            ("track", "1"),
-        ],
     ),
     (
         "album-two/02-22sq.flac",
         Duration::from_nanos(38_800_544_000),
-        &[
-            ("ALBUM", "Fixture Album Two"),
-            ("album_artist", "Fixture Artist Two"),
-            ("ARTIST", "Fixture Artist Two"),
-            ("TITLE", "22SQ"),
-            ("track", "2"),
-        ],
     ),
 ];
-
-fn tag_map(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
-    entries
-        .iter()
-        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
-        .collect()
-}
 
 /// Captures the source file, probes it, asserts the captured source is
 /// unchanged, then returns the probe result unchanged so callers inspect the
@@ -109,7 +62,7 @@ fn probes_every_committed_fixture() {
     let library = sandbox.path().join("library");
     copy_fixture_library(&library);
 
-    for (file_path, expected_duration, expected_tags) in FIXTURES {
+    for (file_path, expected_duration) in FIXTURES {
         let copied = library.join(file_path);
 
         let probed = probe_source_file_checked(&copied)
@@ -117,7 +70,6 @@ fn probes_every_committed_fixture() {
 
         assert_eq!(probed.path, copied);
         assert_eq!(probed.duration, Some(*expected_duration), "{file_path}");
-        assert_eq!(probed.tags, tag_map(expected_tags), "{file_path}");
     }
 }
 

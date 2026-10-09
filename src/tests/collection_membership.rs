@@ -563,6 +563,12 @@ fn extra_metadata_entries_widen_neither_domain_nor_files() {
 
 #[test]
 fn native_pathname_equality_preserves_inventory_spelling() {
+    fn with_trailing_separator(path: &Path) -> PathBuf {
+        let mut spelling = path.as_os_str().to_os_string();
+        spelling.push(std::path::MAIN_SEPARATOR_STR);
+        PathBuf::from(spelling)
+    }
+
     let sandbox = TempSandbox::new();
     let source = create_source(&sandbox);
     fs::write(source.join("track.flac"), b"track").expect("write track");
@@ -571,10 +577,10 @@ fn native_pathname_equality_preserves_inventory_spelling() {
 
     let track = canonical(&source).join("track.flac");
     let failed = canonical(&source).join("failed.flac");
-    // these keys differ textually but compare equal as `Path`s. Lookup
-    // must match them, while results retain the inventory spelling
-    let track_key = canonical(&source).join(".").join("track.flac");
-    let failed_key = canonical(&source).join(".").join("failed.flac");
+    // `Path` equality ignores trailing native separators, including on Windows
+    // verbatim paths. Appending to `OsString` preserves the distinct spelling
+    let track_key = with_trailing_separator(&track);
+    let failed_key = with_trailing_separator(&failed);
     assert_ne!(track.as_os_str(), track_key.as_os_str());
     assert_ne!(failed.as_os_str(), failed_key.as_os_str());
     assert_eq!(track, track_key);
@@ -592,6 +598,10 @@ fn native_pathname_equality_preserves_inventory_spelling() {
     let unresolved = sorted_unresolved_paths(&membership, "meta");
     assert_eq!(unresolved.len(), 1);
     assert_eq!(unresolved[0].as_os_str(), failed.as_os_str());
+    assert!(matches!(
+        reason_for(&membership, "meta", &failed),
+        UnresolvedMetadataReason::Failed(error) if error.as_str() == "nope"
+    ));
 }
 
 #[test]

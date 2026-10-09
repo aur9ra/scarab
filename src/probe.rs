@@ -4,12 +4,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! Obtaining source-file format metadata with `ffprobe`.
+//! Obtaining source-file format duration with `ffprobe`.
 //!
-//! [`probe_source_file`] requests format duration and tags for a supplied path
+//! [`probe_source_file`] requests format duration for a supplied path
 //! using `ffprobe`. No prior source-audio classification is required.
 
-use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -20,11 +19,12 @@ use serde::Deserialize;
 /// The ffprobe executable Scarab invokes. Looked up on `PATH` by name.
 const FFPROBE: &str = "ffprobe";
 
-/// Requests format duration and tags from ffprobe for the supplied path.
+/// Requests format duration from ffprobe for the supplied path.
 ///
 /// The path is passed unchanged and stored unchanged. It is never
 /// canonicalized, absolutized, or otherwise rewritten. Success means ffprobe
-/// exited successfully and returned the requested JSON format metadata.
+/// exited successfully and returned a valid JSON format response. The format
+/// duration may be absent.
 ///
 /// It does not classify the path, establish collection membership, identify or finalize
 /// a logical track, or determine output inclusion. No prior classification is
@@ -37,7 +37,7 @@ pub fn probe_source_file(path: &Path) -> Result<ProbedSourceFile, ProbeError> {
             "-of",
             "json",
             "-show_entries",
-            "format=duration:format_tags",
+            "format=duration",
         ])
         .arg(path)
         // ffprobe writes report files when FFREPORT is inherited
@@ -57,19 +57,15 @@ pub fn probe_source_file(path: &Path) -> Result<ProbedSourceFile, ProbeError> {
 
     Ok(ProbedSourceFile {
         path: path.to_path_buf(),
-        tags: response.format.tags,
         duration: response.format.duration,
     })
 }
 
-/// The requested ffprobe format representation for a supplied path.
+/// The requested ffprobe format duration for a supplied path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbedSourceFile {
     /// The exact path passed to [`probe_source_file`].
     pub path: PathBuf,
-    /// Format tags with keys and values as reported by ffprobe. A missing tags
-    /// field yields an empty map.
-    pub tags: BTreeMap<String, String>,
     /// Format duration parsed from ffprobe's decimal-seconds value, if present.
     pub duration: Option<Duration>,
 }
@@ -116,8 +112,8 @@ impl std::error::Error for ProbeError {
     }
 }
 
-/// An ffprobe response with a required `format` object. Fields inside it are
-/// optional. Missing tags default to an empty map.
+/// An ffprobe response with a required `format` object. The duration inside it
+/// is optional.
 #[derive(Deserialize)]
 struct FfprobeResponse {
     format: FfprobeFormatEntry,
@@ -128,8 +124,6 @@ struct FfprobeResponse {
 struct FfprobeFormatEntry {
     #[serde(default, deserialize_with = "duration_from_seconds")]
     duration: Option<Duration>,
-    #[serde(default)]
-    tags: BTreeMap<String, String>,
 }
 
 /// Deserializes an ffprobe duration reported as decimal seconds. A missing or

@@ -10,7 +10,6 @@ use super::*;
 fn empty_format_object_is_a_valid_empty_response() {
     let response = serde_json::from_str::<FfprobeResponse>(r#"{"format": {}}"#).unwrap();
 
-    assert!(response.format.tags.is_empty());
     assert_eq!(response.format.duration, None);
 }
 
@@ -25,16 +24,28 @@ fn null_format_object_is_an_invalid_response() {
 }
 
 #[test]
-fn missing_tags_field_yields_an_empty_map() {
+fn duration_field_parses_decimal_seconds() {
     let response =
         serde_json::from_str::<FfprobeResponse>(r#"{"format": {"duration": "19.000000"}}"#)
             .unwrap();
 
-    assert!(response.format.tags.is_empty());
     assert_eq!(
         response.format.duration,
         Some(Duration::from_nanos(19_000_000_000))
     );
+}
+
+#[test]
+fn null_duration_yields_no_duration() {
+    let response =
+        serde_json::from_str::<FfprobeResponse>(r#"{"format": {"duration": null}}"#).unwrap();
+
+    assert_eq!(response.format.duration, None);
+}
+
+#[test]
+fn non_string_duration_is_an_invalid_response() {
+    assert!(serde_json::from_str::<FfprobeResponse>(r#"{"format": {"duration": 19.0}}"#).is_err());
 }
 
 #[test]
