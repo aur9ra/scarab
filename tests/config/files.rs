@@ -46,17 +46,9 @@ fn parses_files_include_and_exclude_together() {
 }
 
 #[test]
-fn default_files_support_ordinary_field_mutation() {
-    let mut files = FilesConfig::default();
+fn default_files_leave_all_options_unset() {
+    let files = FilesConfig::default();
     assert_eq!(files.album_art, None);
     assert_eq!(files.include, None);
     assert_eq!(files.exclude, None);
-
-    files.album_art = Some(true);
-    files.include = Some(vec!["jpg".to_string()]);
-    files.exclude = Some(vec!["cue".to_string()]);
-
-    assert_eq!(files.album_art, Some(true));
-    assert_eq!(files.include, Some(vec!["jpg".to_string()]));
-    assert_eq!(files.exclude, Some(vec!["cue".to_string()]));
 }

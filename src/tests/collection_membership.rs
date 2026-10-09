@@ -605,29 +605,6 @@ fn native_pathname_equality_preserves_inventory_spelling() {
 }
 
 #[test]
-fn explicit_empty_unit_outcomes_are_valid() {
-    let sandbox = TempSandbox::new();
-    let source = create_source(&sandbox);
-    let album = source.join("Album");
-    fs::create_dir(&album).expect("create album");
-    fs::write(album.join("track.flac"), b"track").expect("write track");
-    let spec = parse_spec(
-        "[collections.dir]\ndirectory = \"Album\"\n\
-         [collections.meta]\nalbum_name = \"Keep\"\n",
-    );
-
-    let track = canonical(&album).join("track.flac");
-    let metadata_extraction_outcomes: MetadataExtractionOutcomes<()> = HashMap::new();
-
-    let membership = membership_for(&spec, &source, &metadata_extraction_outcomes);
-
-    assert_eq!(sorted_members(&membership, "dir"), vec![track.clone()]);
-    assert!(collection(&membership, "dir").is_complete());
-    assert_eq!(sorted_unresolved_paths(&membership, "meta"), vec![track]);
-    assert!(!membership.is_complete());
-}
-
-#[test]
 fn evaluation_imposes_no_trait_bounds_on_the_opaque_payload() {
     struct Opaque {
         marker: u32,

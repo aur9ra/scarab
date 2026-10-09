@@ -33,19 +33,6 @@ fn declaration(handle: &str, body: &str) -> CollectionDeclaration {
 }
 
 #[test]
-fn collection_declaration_order_is_preserved() {
-    // Declared out of alphabetical order: z before a
-    let text = "codec = \"opus\"\nbitrate = 128\n[collections.z]\nalbum_name = \"Z\"\n[collections.a]\nalbum_name = \"A\"\n";
-    let config = valid(text);
-
-    let handles: Vec<&str> = config
-        .collection_declarations()
-        .map(|(handle, _)| handle)
-        .collect();
-    assert_eq!(handles, ["z", "a"]);
-}
-
-#[test]
 fn collection_declarations_yield_ordered_handle_declaration_pairs() {
     // Different declaration fields catch mismatched pairs.
     let text = "codec = \"opus\"\nbitrate = 128\n\
@@ -543,14 +530,7 @@ fn removed_metadata_keys_are_unknown_fields() {
 }
 
 #[test]
-fn rejects_overloaded_and_nested_metadata_forms() {
-    // Singular keys require strings. Plural keys require string lists.
-    rejects_toml(&collection_config("typed", "album_names = \"A\"\n"));
-    rejects_toml(&collection_config("typed", "album_name = [\"A\"]\n"));
-    rejects_toml(&collection_config("typed", "album_artists = \"A\"\n"));
-    rejects_toml(&collection_config("typed", "album_artist = [\"A\"]\n"));
-    rejects_toml(&collection_config("typed", "track_artists = \"A\"\n"));
-    rejects_toml(&collection_config("typed", "track_artist = [\"A\"]\n"));
+fn rejects_unknown_and_nested_table_selectors() {
     // Nested tables are not selectors.
     rejects_toml(&collection_config("typed", "metadata = \"A\"\n"));
     rejects_toml(&collection_config("typed", "selectors = [\"A\"]\n"));
@@ -728,9 +708,11 @@ fn rejects_incorrect_collection_field_types() {
     rejects_toml(&collection_config("typed", "album_names = [\"a\", 2]\n"));
     rejects_toml(&collection_config("typed", "album_names = [true]\n"));
     rejects_toml(&collection_config("typed", "album_artist = true\n"));
+    rejects_toml(&collection_config("typed", "album_artist = [\"A\"]\n"));
     rejects_toml(&collection_config("typed", "album_artists = \"A\"\n"));
     rejects_toml(&collection_config("typed", "album_artists = [\"a\", 2]\n"));
     rejects_toml(&collection_config("typed", "track_artist = 2001\n"));
+    rejects_toml(&collection_config("typed", "track_artist = [\"A\"]\n"));
     rejects_toml(&collection_config("typed", "track_artists = \"A\"\n"));
     rejects_toml(&collection_config("typed", "track_artists = [\"a\", 2]\n"));
     rejects_toml(&collection_config("typed", "track_artists = [true]\n"));

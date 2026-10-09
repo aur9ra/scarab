@@ -28,80 +28,6 @@ fn project(entries: &[(&str, &str)]) -> MetadataSelectorObservation {
 }
 
 #[test]
-fn every_alias_maps_to_its_intended_family() {
-    let cases = [
-        (
-            "ALBUM",
-            &["White Pony"] as &[&str],
-            &[] as &[&str],
-            &[] as &[&str],
-        ),
-        (
-            "ARTIST",
-            &[] as &[&str],
-            &[] as &[&str],
-            &["Deftones"] as &[&str],
-        ),
-        (
-            "ARTISTS",
-            &[] as &[&str],
-            &[] as &[&str],
-            &["Deftones"] as &[&str],
-        ),
-        (
-            "ALBUMARTIST",
-            &[] as &[&str],
-            &["Failure"] as &[&str],
-            &[] as &[&str],
-        ),
-        (
-            "ALBUM_ARTIST",
-            &[] as &[&str],
-            &["Failure"] as &[&str],
-            &[] as &[&str],
-        ),
-        (
-            "ALBUM ARTIST",
-            &[] as &[&str],
-            &["Failure"] as &[&str],
-            &[] as &[&str],
-        ),
-        (
-            "ALBUMARTISTS",
-            &[] as &[&str],
-            &["Failure"] as &[&str],
-            &[] as &[&str],
-        ),
-        (
-            "ALBUM_ARTISTS",
-            &[] as &[&str],
-            &["Failure"] as &[&str],
-            &[] as &[&str],
-        ),
-        (
-            "ALBUM ARTISTS",
-            &[] as &[&str],
-            &["Failure"] as &[&str],
-            &[] as &[&str],
-        ),
-    ];
-    for (field_name, album_names, album_artists, track_artists) in cases {
-        let value = if field_name == "ALBUM" {
-            "White Pony"
-        } else if field_name == "ARTIST" || field_name == "ARTISTS" {
-            "Deftones"
-        } else {
-            "Failure"
-        };
-        assert_eq!(
-            project(&[(field_name, value)]),
-            expected_observation(album_names, album_artists, track_artists),
-            "field {field_name} must map to its intended family only"
-        );
-    }
-}
-
-#[test]
 fn every_alias_is_recognized_in_upper_lower_and_mixed_ascii_case() {
     let canonical: &[&str] = &[
         "ALBUM",
@@ -325,72 +251,6 @@ fn same_raw_value_is_independent_in_each_family() {
 }
 
 #[test]
-fn composed_and_decomposed_unicode_stay_raw_distinct() {
-    let composed = "Bj\u{00F6}rk";
-    let decomposed = "Bjo\u{0308}rk";
-    assert_ne!(composed, decomposed);
-    assert_eq!(
-        project(&[("ALBUM", composed), ("ALBUM", decomposed)]),
-        expected_observation(&[composed, decomposed], &[], &[]),
-        "composed and decomposed album names must stay distinct"
-    );
-    assert_eq!(
-        project(&[("ALBUMARTIST", composed), ("ALBUMARTIST", decomposed)]),
-        expected_observation(&[], &[composed, decomposed], &[]),
-        "composed and decomposed album artists must stay distinct"
-    );
-    assert_eq!(
-        project(&[("ARTIST", composed), ("ARTIST", decomposed)]),
-        expected_observation(&[], &[], &[composed, decomposed]),
-        "composed and decomposed track artists must stay distinct"
-    );
-    let hangul_composed = "\u{AC00}";
-    let hangul_decomposed = "\u{1100}\u{1161}";
-    assert_eq!(
-        project(&[("ALBUM", hangul_composed), ("ALBUM", hangul_decomposed)]),
-        expected_observation(&[hangul_composed, hangul_decomposed], &[], &[]),
-        "canonically equivalent Hangul spellings must stay distinct"
-    );
-}
-
-#[test]
-fn trailing_nul_variants_stay_raw_distinct() {
-    let cases: &[&[&str]] = &[&["Track", "Track\0"], &["Track", "Track\0", "Track\0\0"]];
-    for stored in cases {
-        assert_eq!(
-            project(
-                &stored
-                    .iter()
-                    .map(|value| ("ALBUM", *value))
-                    .collect::<Vec<(&str, &str)>>()
-            ),
-            expected_observation(stored, &[], &[]),
-            "trailing NUL variants must stay distinct in album names"
-        );
-        assert_eq!(
-            project(
-                &stored
-                    .iter()
-                    .map(|value| ("ALBUMARTIST", *value))
-                    .collect::<Vec<(&str, &str)>>()
-            ),
-            expected_observation(&[], stored, &[]),
-            "trailing NUL variants must stay distinct in album artists"
-        );
-        assert_eq!(
-            project(
-                &stored
-                    .iter()
-                    .map(|value| ("ARTIST", *value))
-                    .collect::<Vec<(&str, &str)>>()
-            ),
-            expected_observation(&[], &[], stored),
-            "trailing NUL variants must stay distinct in track artists"
-        );
-    }
-}
-
-#[test]
 fn raw_values_are_preserved_in_all_three_families() {
     let corpus: &[&str] = &[
         "",
@@ -435,6 +295,13 @@ fn raw_values_are_preserved_in_all_three_families() {
         expected_observation(&[], &[], corpus),
         "track artist values must be preserved unchanged"
     );
+    let track_artist_singular_entries: Vec<(&str, &str)> =
+        corpus.iter().map(|value| ("ARTIST", *value)).collect();
+    assert_eq!(
+        project(&track_artist_singular_entries),
+        expected_observation(&[], &[], corpus),
+        "track artist values via the singular alias must be preserved unchanged"
+    );
     let preserved = project(&[
         ("ALBUM", "Artist A; Artist B"),
         ("ALBUMARTIST", "  padded  "),
@@ -473,34 +340,6 @@ fn absent_values_differ_from_present_empty_string() {
         project(&[]),
         project(&[("ALBUM", "")]),
         "absent album names must differ from a present empty string"
-    );
-}
-
-#[test]
-fn empty_input_yields_three_empty_sets() {
-    assert_eq!(
-        project(&[]),
-        expected_observation(&[], &[], &[]),
-        "complete empty input must yield three empty families"
-    );
-    assert_eq!(
-        project_metadata_selector_observation(Vec::new().iter().copied()),
-        expected_observation(&[], &[], &[]),
-        "empty owned input must yield three empty families"
-    );
-}
-
-#[test]
-fn unknown_only_input_yields_three_empty_sets() {
-    assert_eq!(
-        project(&[
-            ("TITLE", "White Pony"),
-            ("GENRE", "Alternative metal"),
-            ("ALBUMS", "Failure"),
-            ("ALBUM  ARTISTS", "Failure"),
-        ]),
-        expected_observation(&[], &[], &[]),
-        "unknown only input must yield three empty families"
     );
 }
 

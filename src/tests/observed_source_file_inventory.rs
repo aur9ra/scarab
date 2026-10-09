@@ -133,14 +133,20 @@ fn metadata_requirements_borrow_inventory_retained_spelling() {
     use crate::test_support::parse_spec;
 
     let spec = parse_spec("[collections.meta]\ndirectory = \"Album\"\nalbum_name = \"Keep\"\n");
-    let retained = PathBuf::from("/music/album/./track.FlaC");
-    let equal_spelling = PathBuf::from("/music/album/track.FlaC");
-    assert_eq!(retained, equal_spelling);
-    assert_ne!(retained.as_os_str(), equal_spelling.as_os_str());
+    let first_spelling = PathBuf::from("/music/album/./track.FlaC");
+    let second_spelling = PathBuf::from("/music/album/track.FlaC");
+    assert_eq!(first_spelling, second_spelling);
+    assert_ne!(first_spelling.as_os_str(), second_spelling.as_os_str());
     let inventory = aggregate_observations(
         vec![configured_scope("meta", "/music/album", &["Album"])],
-        vec![vec![retained.clone(), equal_spelling]],
+        vec![vec![first_spelling, second_spelling]],
     );
+    let retained = inventory
+        .files()
+        .next()
+        .expect("aggregation must retain one observed source file")
+        .path()
+        .to_path_buf();
     let paths = required_metadata_paths(&spec, &inventory);
     assert_eq!(paths.len(), 1);
     assert_eq!(paths[0].as_os_str(), retained.as_os_str());

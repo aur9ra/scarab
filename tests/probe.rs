@@ -6,9 +6,10 @@
 
 //! Real ffprobe integration tests over the provided CC0 FLAC sample fixtures.
 //!
-//! Every probed path lives under a disposable copy of the committed fixture
-//! library, so ffprobe is never given a committed fixture path during testing.
+//! Successful probes target disposable copies of the committed fixture library,
+//! so ffprobe is never given a committed fixture path during testing.
 
+use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
@@ -115,12 +116,12 @@ fn preserves_exact_path() {
 #[test]
 fn nonexistent_path_reports_failed_probe_process() {
     let sandbox = TempSandbox::new();
-    let library = sandbox.path().join("library");
-    copy_fixture_library(&library);
-    let missing = library.join("no-such-file.flac");
+    let parent = sandbox.path().join("library");
+    fs::create_dir(&parent).expect("create empty parent directory");
+    let missing = parent.join("no-such-file.flac");
     assert!(
         !missing.exists(),
-        "the copied root must not contain {}",
+        "the empty root must not contain {}",
         missing.display()
     );
 

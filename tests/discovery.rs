@@ -14,9 +14,12 @@ use scarab::{DiscoveryError, discover_source_files};
 
 mod common;
 
-use common::{SourceTreeSnapshot, TempSandbox, copy_fixture_library};
+use common::{SourceTreeSnapshot, TempSandbox};
 
-/// Every ordinary file under the committed fixture library.
+/// The synthetic discovery layout: six relative ordinary files.
+///
+/// Discovery examines entry names and kinds, not file bytes, so these are
+/// created with tiny synthetic contents.
 const LIBRARY_FILES: &[&str] = &[
     "README.md",
     "album-one/01-flamenco-road.flac",
@@ -25,6 +28,18 @@ const LIBRARY_FILES: &[&str] = &[
     "album-two/01-hans-im-schnokeloch.flac",
     "album-two/02-22sq.flac",
 ];
+
+/// Populates `root` with tiny synthetic ordinary files matching the relative
+/// layout of [`LIBRARY_FILES`]. Contents are irrelevant to discovery.
+fn create_synthetic_library(root: &Path) {
+    for relative in LIBRARY_FILES {
+        let path = root.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create synthetic library directory");
+        }
+        fs::write(&path, relative.as_bytes()).expect("write synthetic library file");
+    }
+}
 
 /// Runs discovery over `root` and asserts the source tree is untouched
 /// before inspecting the result. Returns `result` as a sorted [`Vec<PathBuf>`].
@@ -35,7 +50,7 @@ fn discover_source_files_checked(root: &Path) -> Result<Vec<PathBuf>, DiscoveryE
     result
 }
 
-/// Builds the expected discovery result: every fixture joined
+/// Builds the expected discovery result: every synthetic library file joined
 /// under `root`. Sorting is handled by [`PathBuf`]'s [`Ord`]
 /// implementation, rather than predetermination.
 fn expected_library_files_under_root(root: &Path) -> Vec<PathBuf> {
@@ -56,13 +71,13 @@ fn paths_os_spellings(paths: &[PathBuf]) -> Vec<OsString> {
 }
 
 #[test]
-fn finds_every_fixture_file_recursively_with_root_prefix() {
+fn finds_every_library_file_recursively_with_root_prefix() {
     let sandbox = TempSandbox::new();
     let library = sandbox.path().join("library");
-    copy_fixture_library(&library);
+    create_synthetic_library(&library);
 
-    let discovered: Vec<PathBuf> =
-        discover_source_files_checked(&library).expect("discovery over fixtures must succeed");
+    let discovered: Vec<PathBuf> = discover_source_files_checked(&library)
+        .expect("discovery over synthetic files must succeed");
 
     assert_eq!(discovered, expected_library_files_under_root(&library));
 }
@@ -71,7 +86,7 @@ fn finds_every_fixture_file_recursively_with_root_prefix() {
 fn supplied_root_spelling_is_preserved_and_honored() {
     let sandbox = TempSandbox::new();
     let library = sandbox.path().join("library");
-    copy_fixture_library(&library);
+    create_synthetic_library(&library);
 
     // A redundant internal `./` component in the supplied root must be
     // retained verbatim in every discovered path, never normalized away.
@@ -90,7 +105,7 @@ fn supplied_root_spelling_is_preserved_and_honored() {
 fn trailing_separator_and_dot_root_spelling_is_preserved() {
     let sandbox = TempSandbox::new();
     let library = sandbox.path().join("library");
-    copy_fixture_library(&library);
+    create_synthetic_library(&library);
 
     // Root validation inspects a probe spelling with trailing separators and
     // `.` components stripped, but traversal and returned paths must keep the
@@ -114,7 +129,7 @@ fn trailing_separator_and_dot_root_spelling_is_preserved() {
 fn results_are_deterministically_sorted() {
     let sandbox = TempSandbox::new();
     let library = sandbox.path().join("library");
-    copy_fixture_library(&library);
+    create_synthetic_library(&library);
 
     let first = discover_source_files_checked(&library).expect("first discovery must succeed");
     let second = discover_source_files_checked(&library).expect("second discovery must succeed");

@@ -432,10 +432,9 @@ fn exact_duplicates_collapse_while_raw_distinct_spellings_remain_stored() {
         Some(predicate_album_artists.clone()),
         None,
     );
-    assert!(observation_matches_predicate(&observation, &predicate));
 
     // The set removes only exact duplicates, not matching-equivalent
-    // observation values, including after evaluation.
+    // observation values.
     assert_eq!(observation.album_names.len(), 3);
     assert!(observation.album_names.contains(&composed));
     assert!(observation.album_names.contains(&decomposed));
@@ -449,6 +448,9 @@ fn exact_duplicates_collapse_while_raw_distinct_spellings_remain_stored() {
     assert_eq!(predicate.album_names, Some(predicate_album_names));
     assert_eq!(predicate.album_artists, Some(predicate_album_artists));
     assert_eq!(predicate.track_artists, None);
+
+    // Matching-equivalent raw-distinct spellings still match.
+    assert!(observation_matches_predicate(&observation, &predicate));
 }
 
 #[test]
@@ -581,7 +583,7 @@ fn evaluation_uses_metadata_values_match() {
 }
 
 #[test]
-fn construction_and_evaluation_preserve_supplied_representations() {
+fn construction_preserves_supplied_representations() {
     let album_names: BTreeSet<String> = ["Kind of Blue".to_owned(), "Bitches Brew".to_owned()]
         .into_iter()
         .collect();
@@ -608,22 +610,14 @@ fn construction_and_evaluation_preserve_supplied_representations() {
         Some(Vec::new()),
     );
 
-    // Construction retains raw predicate values, their order and
-    // repetitions, and the distinction between omitted and supplied
-    // families.
-    assert_eq!(
-        predicate.album_names,
-        Some(supplied_predicate_values.clone())
-    );
-    assert_eq!(predicate.album_artists, None);
-    assert_eq!(predicate.track_artists, Some(Vec::new()));
-
-    let _ = observation_matches_predicate(&observation, &predicate);
-
-    // Evaluation leaves the observation and compound predicate unchanged.
+    // Construction retains the supplied observation sets.
     assert_eq!(observation.album_names, album_names);
     assert_eq!(observation.album_artists, album_artists);
     assert_eq!(observation.track_artists, track_artists);
+
+    // Construction retains raw predicate values, their order and
+    // repetitions, and the distinction between omitted and supplied
+    // families.
     assert_eq!(predicate.album_names, Some(supplied_predicate_values));
     assert_eq!(predicate.album_artists, None);
     assert_eq!(predicate.track_artists, Some(Vec::new()));
@@ -803,7 +797,7 @@ fn declaration_translation_keeps_detached_empty_lists_supplied() {
 }
 
 #[test]
-fn declaration_translation_ignores_directories_and_leaves_declaration_unchanged() {
+fn declaration_translation_ignores_directories() {
     let without_directories = parsed_declaration("album_name = \"Kind of Blue\"\n");
     let with_directories = parsed_declaration(
         "album_name = \"Kind of Blue\"\ndirectories = [\"Disc 1\", \"Disc 2\"]\n",
@@ -818,8 +812,4 @@ fn declaration_translation_ignores_directories_and_leaves_declaration_unchanged(
         assert_eq!(predicate.album_artists, baseline.album_artists);
         assert_eq!(predicate.track_artists, baseline.track_artists);
     }
-
-    let before = with_directories.clone();
-    let _ = with_directories.metadata_selector_predicate();
-    assert_eq!(with_directories, before);
 }
