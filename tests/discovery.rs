@@ -56,7 +56,15 @@ fn discover_source_files_checked(root: &Path) -> Result<Vec<PathBuf>, DiscoveryE
 fn expected_library_files_under_root(root: &Path) -> Vec<PathBuf> {
     let mut expected: Vec<PathBuf> = LIBRARY_FILES
         .iter()
-        .map(|fixture| root.join(fixture))
+        .map(|fixture| {
+            // preserve the root spelling, appending descendants with native separators
+            fixture
+                .split('/')
+                .fold(root.to_path_buf(), |mut path, name| {
+                    path.push(name);
+                    path
+                })
+        })
         .collect();
     expected.sort();
     expected
