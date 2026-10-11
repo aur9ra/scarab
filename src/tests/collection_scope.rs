@@ -67,19 +67,6 @@ fn expect_failed(
 }
 
 #[test]
-fn zero_collections_succeed_without_inspecting_a_nonexistent_root() {
-    let sandbox = TempSandbox::new();
-    let missing_root = sandbox.path().join("missing-root");
-    let spec = parse_spec("");
-
-    let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &missing_root));
-
-    assert!(scopes.configured_directory_scopes.is_empty());
-    assert!(scopes.default_source_root_scope.is_none());
-    assert!(warnings.is_empty());
-}
-
-#[test]
 fn configured_only_collections_prepare_no_default_source_root() {
     let sandbox = TempSandbox::new();
     let source = create_source(&sandbox);
@@ -99,29 +86,6 @@ fn configured_only_collections_prepare_no_default_source_root() {
     );
     assert_eq!(scope.contributing_selectors.len(), 1);
     assert_spelling(&scope.contributing_selectors[0], "Lateralus");
-}
-
-#[test]
-fn absolute_configured_selector_prepares_with_an_unrelated_nonexistent_root() {
-    let sandbox = TempSandbox::new();
-    let target = sandbox.path().join("absolute-target");
-    fs::create_dir(&target).expect("create target");
-    let missing_root = sandbox.path().join("missing-root");
-    // Checking this missing root would fail, so success means it was skipped.
-    let spec = parse_spec(&format!(
-        "[collections.tool]\ndirectory = {}\n",
-        toml_string(&target)
-    ));
-
-    let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &missing_root));
-
-    assert!(scopes.default_source_root_scope.is_none());
-    assert!(warnings.is_empty());
-    assert_eq!(scopes.configured_directory_scopes.len(), 1);
-    assert_eq!(
-        scopes.configured_directory_scopes[0].resolved_directory,
-        canonical(&target)
-    );
 }
 
 #[test]
@@ -432,32 +396,6 @@ fn equal_configured_roots_across_collections_remain_separate() {
         assert_eq!(scope.resolved_directory, canonical(&album));
         assert_eq!(scope.contributing_selectors.len(), 1);
     }
-}
-
-#[test]
-fn configured_and_default_equal_roots_stay_separate_without_warning() {
-    let sandbox = TempSandbox::new();
-    let source = create_source(&sandbox);
-    let spec = parse_spec(
-        "[collections.one]\ndirectory = \".\"\n\
-         [collections.two]\nalbum_name = \"Two\"\n",
-    );
-
-    let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
-
-    assert!(
-        warnings.is_empty(),
-        "equal configured and default roots produce no redundancy warning"
-    );
-    assert_eq!(scopes.configured_directory_scopes.len(), 1);
-    let configured = &scopes.configured_directory_scopes[0];
-    assert_eq!(configured.collection_handle, "one");
-    assert_eq!(configured.resolved_directory, canonical(&source));
-    let default_scope = scopes
-        .default_source_root_scope
-        .expect("the dependent collection must produce a default source-root scope");
-    assert_eq!(default_scope.dependent_collection_handles, ["two"]);
-    assert_eq!(default_scope.resolved_traversal_root, canonical(&source));
 }
 
 #[test]

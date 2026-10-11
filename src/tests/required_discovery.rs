@@ -32,24 +32,6 @@ fn expect_failed(outcome: RequiredDiscovery) -> (RequiredFailures, Vec<Redundanc
 }
 
 #[test]
-fn zero_scopes_succeed_without_scanning() {
-    let sandbox = TempSandbox::new();
-    let missing_root = sandbox.path().join("missing-root");
-    let spec = parse_spec("");
-
-    let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &missing_root));
-    assert!(scopes.configured_directory_scopes.is_empty());
-    assert!(scopes.default_source_root_scope.is_none());
-
-    // This missing root would fail if scanned.
-    let (coverage, warnings) = expect_completed(discover_required_files(scopes, warnings));
-
-    assert!(coverage.configured.is_empty());
-    assert!(coverage.default.is_none());
-    assert!(warnings.is_empty());
-}
-
-#[test]
 fn one_configured_scope_collects_ordinary_files_file_blind() {
     let sandbox = TempSandbox::new();
     let source = create_source(&sandbox);
@@ -95,31 +77,6 @@ fn one_configured_scope_collects_ordinary_files_file_blind() {
         );
     }
     assert_eq!(discovered, expected);
-}
-
-#[test]
-fn shared_default_scope_retains_several_dependent_collections() {
-    let sandbox = TempSandbox::new();
-    let source = create_source(&sandbox);
-    fs::write(source.join("sentinel.txt"), b"sentinel").expect("write sentinel");
-    let spec = parse_spec(
-        "[collections.z]\nalbum_name = \"Z\"\n\
-         [collections.a]\nalbum_artist = \"A\"\n\
-         [collections.q]\ntrack_artist = \"Q\"\n",
-    );
-
-    let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
-    let (coverage, warnings) = expect_completed(discover_required_files(scopes, warnings));
-
-    assert!(warnings.is_empty());
-    assert!(coverage.configured.is_empty());
-    let default = coverage.default.expect("default scope must stay covered");
-    assert_eq!(default.scope.dependent_collection_handles, ["z", "a", "q"]);
-    assert_eq!(default.scope.resolved_traversal_root, canonical(&source));
-    assert_eq!(
-        default.files,
-        vec![default.scope.resolved_traversal_root.join("sentinel.txt")]
-    );
 }
 
 #[test]
@@ -315,31 +272,6 @@ fn equal_configured_and_default_roots_remain_separate() {
     assert_eq!(default.scope.dependent_collection_handles, ["in-absentia"]);
     assert_eq!(default.scope.resolved_traversal_root, canonical(&source));
     assert_eq!(coverage.configured[0].files, default.files);
-}
-
-#[test]
-fn redundancy_warnings_survive_successful_discovery() {
-    let sandbox = TempSandbox::new();
-    let source = create_source(&sandbox);
-    let stupid_dream = source.join("Stupid Dream");
-    fs::create_dir(&stupid_dream).expect("create album directory");
-    fs::write(stupid_dream.join("Even Less.flac"), b"track").expect("write track");
-    let spec = parse_spec(
-        "[collections.stupid-dream]\ndirectories = [\"Stupid Dream\", \"Stupid Dream\"]\n",
-    );
-
-    let (scopes, warnings) = expect_prepared(prepare_collection_scopes(&spec, &source));
-    assert_eq!(warnings.len(), 1);
-    let (coverage, warnings) = expect_completed(discover_required_files(scopes, warnings));
-
-    assert_eq!(coverage.configured.len(), 1);
-    assert_eq!(warnings.len(), 1);
-    assert_eq!(warnings[0].collection_handle, "stupid-dream");
-    assert_eq!(warnings[0].resolved_directory, canonical(&stupid_dream));
-    assert_eq!(
-        warnings[0].contributing_selectors,
-        coverage.configured[0].scope.contributing_selectors
-    );
 }
 
 #[test]

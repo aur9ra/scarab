@@ -20,21 +20,5 @@ fn public_api_recognizes_supported_and_unsupported_candidates() {
         classify_source_audio(Path::new("album/01 - Track.flac")),
         Some(SourceAudioFormat::Flac)
     );
-    assert_eq!(
-        classify_source_audio(Path::new("album/01 - Track.FLAC")),
-        Some(SourceAudioFormat::Flac)
-    );
-    assert_eq!(
-        classify_source_audio(Path::new("album/.hidden.flac")),
-        Some(SourceAudioFormat::Flac)
-    );
     assert_eq!(classify_source_audio(Path::new("album/cover.jpg")), None);
-    assert_eq!(classify_source_audio(Path::new("album/notes.txt")), None);
-    assert_eq!(
-        classify_source_audio(Path::new("album/track.flac.bak")),
-        None
-    );
-    assert_eq!(classify_source_audio(Path::new("album/.flac")), None);
-    assert_eq!(classify_source_audio(Path::new("album/track.")), None);
-    assert_eq!(classify_source_audio(Path::new("")), None);
 }

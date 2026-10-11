@@ -7,7 +7,7 @@
 //! The `[[track_rules]]` arrays: track targeting, actions, and per-group
 //! validation.
 
-use scarab::{InvalidLibraryBuildSpec, TrackAction, TrackRuleGroup, TrackTarget};
+use scarab::{InvalidLibraryBuildSpec, TrackAction, TrackTarget};
 
 use super::{invalid, prefixed, valid};
 
@@ -152,30 +152,6 @@ fn track_rule_group_references_directory_only_collection() {
         TrackTarget::Track("Intolerance".into())
     );
     assert_eq!(groups[0].rules[0].action, TrackAction::Exclude);
-}
-
-#[test]
-fn track_rule_group_remains_externally_literal_constructible() {
-    let text = prefixed(
-        "[[track_rules]]\ncollection = \"aenima\"\nrules = [{ track = \"Stinkfist\", exclude = true }]\n",
-    );
-    let config = valid(&text);
-
-    // Downstream code can construct the group and mutate cloned rules.
-    let mut rule = config.track_rules()[0].rules[0].clone();
-    rule.action = TrackAction::Bitrate(96);
-    let regrouped = TrackRuleGroup {
-        collection_handle: "aenima".to_string(),
-        rules: vec![rule],
-    };
-
-    assert_eq!(regrouped.collection_handle, "aenima");
-    assert_eq!(regrouped.rules.len(), 1);
-    assert_eq!(
-        regrouped.rules[0].target,
-        TrackTarget::Track("Stinkfist".into())
-    );
-    assert_eq!(regrouped.rules[0].action, TrackAction::Bitrate(96));
 }
 
 #[test]

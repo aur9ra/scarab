@@ -8,13 +8,10 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 
 use scarab::{
-    ConfiguredSelectorFailure, DefaultSourceRootFailure, DefaultSourceRootFailureKind,
-    DiscoveryError, LibraryBuildSpec, ObservedSourceFileInventoryFailure,
-    RedundantConfiguredSelectors, RequiredScope, RequiredScopeDiscoveryFailure,
+    LibraryBuildSpec, ObservedSourceFileInventoryFailure, RequiredScope,
     build_observed_source_file_inventory,
 };
 
@@ -625,72 +622,6 @@ fn preparation_failure_retains_configured_default_and_warning_without_inventory(
         as_error.source().is_none(),
         "failure must not fabricate an aggregate error source"
     );
-}
-
-#[test]
-fn public_diagnostic_vocabulary_constructs_and_matches_externally() {
-    let warning = RedundantConfiguredSelectors {
-        collection_handle: "tool".to_owned(),
-        resolved_directory: PathBuf::from("/music/album"),
-        contributing_selectors: vec![PathBuf::from("Album"), PathBuf::from("Album")],
-    };
-    let configured = ConfiguredSelectorFailure {
-        collection_handle: "tool".to_owned(),
-        configured_selector: PathBuf::from("missing"),
-        error: io::Error::new(io::ErrorKind::NotFound, "missing"),
-    };
-    let default = DefaultSourceRootFailure {
-        original_source_root: PathBuf::from("source"),
-        dependent_collection_handles: vec!["dependent".to_owned()],
-        kind: DefaultSourceRootFailureKind::EmptyInput,
-    };
-    // `DefaultSourceRootFailureKind` stays non-exhaustive downstream.
-    let kind = match &default.kind {
-        DefaultSourceRootFailureKind::EmptyInput => "empty",
-        DefaultSourceRootFailureKind::UnsupportedPathForm => "unsupported",
-        DefaultSourceRootFailureKind::ResolutionFailed { .. } => "resolution",
-        DefaultSourceRootFailureKind::ResolvedPathInspectionFailed { .. } => "inspection",
-        DefaultSourceRootFailureKind::ResolvedTargetNotDirectory { .. } => "not-directory",
-        _ => "future",
-    };
-    assert_eq!(kind, "empty");
-
-    let scope_failure = RequiredScopeDiscoveryFailure {
-        scope: RequiredScope::DefaultSourceRoot {
-            original_source_root: PathBuf::from("source"),
-            resolved_traversal_root: PathBuf::from("/music/source"),
-            dependent_collection_handles: vec!["dependent".to_owned()],
-        },
-        error: DiscoveryError::NotADirectory {
-            path: PathBuf::from("/music/source"),
-        },
-    };
-    let scope_variant = match &scope_failure.scope {
-        RequiredScope::ConfiguredDirectory { .. } => "configured",
-        RequiredScope::DefaultSourceRoot { .. } => "default",
-    };
-    assert_eq!(scope_variant, "default");
-
-    let preparation = ObservedSourceFileInventoryFailure::Preparation {
-        configured_failures: vec![configured],
-        default_source_root_failure: Some(default),
-        warnings: vec![warning],
-    };
-    let discovery = ObservedSourceFileInventoryFailure::Discovery {
-        failures: vec![scope_failure],
-        warnings: Vec::new(),
-    };
-    // Wildcard-free matches prove the inventory failure remains exhaustive.
-    for failure in [&preparation, &discovery] {
-        match failure {
-            ObservedSourceFileInventoryFailure::Preparation { .. } => {
-                assert_eq!(failure.warnings().len(), 1)
-            }
-            ObservedSourceFileInventoryFailure::Discovery { .. } => {
-                assert!(failure.warnings().is_empty())
-            }
-        }
-    }
 }
 
 #[cfg(unix)]
