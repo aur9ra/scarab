@@ -14,7 +14,7 @@ use scarab::{
     CollectionDeclaration, InvalidLibraryBuildSpec, LibraryBuildSpec, LibraryBuildSpecError, parse,
 };
 
-use super::{collection_config, invalid, rejects_toml, valid};
+use super::{assert_error_message_contains, collection_config, invalid, rejects_toml, valid};
 
 fn collection_directories(config: &LibraryBuildSpec, handle: &str) -> Vec<PathBuf> {
     config
@@ -723,122 +723,133 @@ fn rejects_incorrect_collection_field_types() {
 }
 
 #[test]
-fn validation_messages_name_collection_identities_and_toml_keys() {
-    assert_eq!(
-        invalid(&collection_config("bare", "")).to_string(),
-        "collection `bare` must set at least one of the TOML keys `album_name`, `album_names`, `album_artist`, `album_artists`, `track_artist`, `track_artists`, `directory`, or `directories`"
+fn display_missing_collection_selector_names_identity_and_every_key() {
+    assert_error_message_contains(
+        InvalidLibraryBuildSpec::MissingCollectionSelector {
+            collection_handle: "opiate".into(),
+        },
+        &[
+            "`opiate`",
+            "`album_name`",
+            "`album_names`",
+            "`album_artist`",
+            "`album_artists`",
+            "`track_artist`",
+            "`track_artists`",
+            "`directory`",
+            "`directories`",
+            "at least one",
+        ],
     );
-    assert_eq!(
-        invalid(&collection_config(
-            "both_names",
-            "album_name = \"A\"\nalbum_names = [\"B\"]\n"
-        ))
-        .to_string(),
-        "collection `both_names` must set at most one of the TOML keys `album_name` or `album_names`"
+}
+
+#[test]
+fn display_metadata_conflicts_pair_the_correct_singular_and_plural_keys() {
+    let cases = [
+        (
+            InvalidLibraryBuildSpec::ConflictingCollectionAlbumNameForms {
+                collection_handle: "lateralus".into(),
+            },
+            [
+                "`lateralus`",
+                "`album_name`",
+                "`album_names`",
+                "at most one",
+            ],
+        ),
+        (
+            InvalidLibraryBuildSpec::ConflictingCollectionAlbumArtistForms {
+                collection_handle: "undertow".into(),
+            },
+            [
+                "`undertow`",
+                "`album_artist`",
+                "`album_artists`",
+                "at most one",
+            ],
+        ),
+        (
+            InvalidLibraryBuildSpec::ConflictingCollectionTrackArtistForms {
+                collection_handle: "salival".into(),
+            },
+            [
+                "`salival`",
+                "`track_artist`",
+                "`track_artists`",
+                "at most one",
+            ],
+        ),
+        (
+            InvalidLibraryBuildSpec::ConflictingCollectionDirectoryForms {
+                collection_handle: "vicarious".into(),
+            },
+            ["`vicarious`", "`directory`", "`directories`", "at most one"],
+        ),
+    ];
+    for (error, fragments) in cases {
+        assert_error_message_contains(error, &fragments);
+    }
+}
+
+#[test]
+fn display_empty_metadata_lists_name_the_plural_key_and_empty_list() {
+    let cases = [
+        (
+            InvalidLibraryBuildSpec::EmptyCollectionAlbumNames {
+                collection_handle: "aenima".into(),
+            },
+            "`aenima`",
+            "has an empty `album_names` list",
+        ),
+        (
+            InvalidLibraryBuildSpec::EmptyCollectionAlbumArtists {
+                collection_handle: "schism".into(),
+            },
+            "`schism`",
+            "has an empty `album_artists` list",
+        ),
+        (
+            InvalidLibraryBuildSpec::EmptyCollectionTrackArtists {
+                collection_handle: "ticks".into(),
+            },
+            "`ticks`",
+            "has an empty `track_artists` list",
+        ),
+    ];
+    for (error, identity, empty_list) in cases {
+        assert_error_message_contains(error, &[identity, empty_list]);
+    }
+}
+
+#[test]
+fn display_empty_directory_arms_distinguish_path_list_and_entry() {
+    // "has an empty" keeps the boundary against a "has a nonempty" substitution.
+    assert_error_message_contains(
+        InvalidLibraryBuildSpec::EmptyCollectionDirectory {
+            collection_handle: "vicarious".into(),
+        },
+        &["`vicarious`", "has an empty `directory` path"],
     );
-    assert_eq!(
-        invalid(&collection_config(
-            "both_artists",
-            "album_artist = \"A\"\nalbum_artists = [\"B\"]\n"
-        ))
-        .to_string(),
-        "collection `both_artists` must set at most one of the TOML keys `album_artist` or `album_artists`"
+    assert_error_message_contains(
+        InvalidLibraryBuildSpec::EmptyCollectionDirectories {
+            collection_handle: "jambi".into(),
+        },
+        &["`jambi`", "has an empty `directories` list"],
     );
-    assert_eq!(
-        invalid(&collection_config(
-            "both_tracks",
-            "track_artist = \"A\"\ntrack_artists = [\"B\"]\n"
-        ))
-        .to_string(),
-        "collection `both_tracks` must set at most one of the TOML keys `track_artist` or `track_artists`"
+
+    let entry = InvalidLibraryBuildSpec::EmptyCollectionDirectoriesEntry {
+        collection_handle: "rosetta".into(),
+        index: 2,
+    }
+    .to_string();
+    assert!(entry.contains("`rosetta`"), "missing handle in `{entry}`");
+    assert!(
+        entry.contains("has an empty `directories` entry"),
+        "missing entry category in `{entry}`"
     );
-    assert_eq!(
-        invalid(&collection_config("empty", "album_names = []\n")).to_string(),
-        "collection `empty` has an empty `album_names` list"
-    );
-    assert_eq!(
-        invalid(&collection_config("empty", "album_artists = []\n")).to_string(),
-        "collection `empty` has an empty `album_artists` list"
-    );
-    assert_eq!(
-        invalid(&collection_config("empty", "track_artists = []\n")).to_string(),
-        "collection `empty` has an empty `track_artists` list"
-    );
-    assert_eq!(
-        invalid(&collection_config(
-            "both",
-            "directory = \"A\"\ndirectories = [\"B\"]\n"
-        ))
-        .to_string(),
-        "collection `both` must set at most one of the TOML keys `directory` or `directories`"
-    );
-    assert_eq!(
-        invalid(&collection_config("empty", "directory = \"\"\n")).to_string(),
-        "collection `empty` has an empty `directory` path"
-    );
-    assert_eq!(
-        invalid(&collection_config("empty", "directories = []\n")).to_string(),
-        "collection `empty` has an empty `directories` list"
-    );
-    assert_eq!(
-        invalid(&collection_config("empty", "directories = [\"\"]\n")).to_string(),
-        "collection `empty` has an empty `directories` entry at index 0"
-    );
-    assert_eq!(
-        invalid(&super::prefixed(
-            "[[collection_rules]]\ncollections = [\"missing\"]\nbitrate = 96\n"
-        ))
-        .to_string(),
-        "rule references undeclared collection handle `missing`"
-    );
-    assert_eq!(
-        invalid(&super::prefixed(
-            "[[collection_rules]]\ncollections = []\nbitrate = 96\n"
-        ))
-        .to_string(),
-        "collection rule must list at least one collection handle in `collections`"
-    );
-    assert_eq!(
-        invalid(&super::prefixed(
-            "[[collection_rules]]\ncollections = [\"aenima\", \"aenima\"]\nbitrate = 96\n"
-        ))
-        .to_string(),
-        "collection handle `aenima` is targeted more than once by `collection_rules`"
-    );
-    assert_eq!(
-        invalid(&super::prefixed(
-            "[[track_rules]]\ncollection = \"aenima\"\nrules = [\
-             { track = \"Track\", bitrate = 96 }, { track = \"Track\", exclude = true }]\n"
-        ))
-        .to_string(),
-        "track `Track` in collection `aenima` has more than one rule"
-    );
-    assert_eq!(
-        invalid(&super::prefixed(
-            "[[track_rules]]\ncollection = \"aenima\"\n"
-        ))
-        .to_string(),
-        "track rule group for collection `aenima` has no nested `rules`"
-    );
-    assert_eq!(
-        invalid(&super::prefixed(
-            "[[track_rules]]\ncollection = \"aenima\"\nrules = [{ bitrate = 96 }]\n"
-        ))
-        .to_string(),
-        "track rule for collection `aenima` must set exactly one of the TOML keys `track` or `tracks`"
-    );
-    assert_eq!(
-        invalid(&super::prefixed(
-            "[[track_rules]]\ncollection = \"aenima\"\nrules = [{ tracks = [], bitrate = 96 }]\n"
-        ))
-        .to_string(),
-        "track rule for collection `aenima` has an empty `tracks` list"
-    );
-    assert_eq!(
-        invalid(&super::prefixed(
-            "[[track_rules]]\ncollection = \"aenima\"\nrules = [{ track = \"Track\", exclude = false }]\n"
-        ))
-        .to_string(),
-        "track rule for collection `aenima` must set exactly one of the TOML keys `exclude` or `bitrate`"
+    // `ends_with` pins the complete decimal index, rejecting `index 20`.
+    assert!(
+        entry.ends_with("at index 2"),
+        "incomplete index in `{entry}`"
     );
 }

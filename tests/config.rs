@@ -65,6 +65,19 @@ fn rejects_toml(text: &str) {
     }
 }
 
+/// Renders a structured error and asserts its text contains every fragment.
+/// Tests protect focused identities, keys, and categories without treating
+/// exact sentences as a compatibility contract.
+fn assert_error_message_contains(error: InvalidLibraryBuildSpec, fragments: &[&str]) {
+    let rendered = error.to_string();
+    for fragment in fragments {
+        assert!(
+            rendered.contains(*fragment),
+            "expected `{rendered}` to contain `{fragment}`"
+        );
+    }
+}
+
 /// One standalone collection declaration on top of the minimal global config.
 fn collection_config(handle: &str, body: &str) -> String {
     format!("codec = \"opus\"\nbitrate = 128\n[collections.{handle}]\n{body}")

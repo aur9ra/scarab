@@ -374,7 +374,8 @@ pub enum InvalidLibraryBuildSpec {
     TrackTargetNotExclusive { collection_handle: String },
     /// A track rule configured an empty `tracks` list.
     EmptyTracks { collection_handle: String },
-    /// A track rule set both `exclude = true` and `bitrate`, or neither.
+    /// A track rule did not set a valid action. It must set `exclude = true`
+    /// with `bitrate` omitted, or `bitrate` with `exclude` omitted.
     TrackActionNotExclusive { collection_handle: String },
 }
 
@@ -510,7 +511,7 @@ impl fmt::Display for InvalidLibraryBuildSpec {
             InvalidLibraryBuildSpec::TrackActionNotExclusive { collection_handle } => {
                 write!(
                     f,
-                    "track rule for collection `{collection_handle}` must set exactly one of the TOML keys `exclude` or `bitrate`"
+                    "track rule for collection `{collection_handle}` must set either `exclude = true` with `bitrate` omitted or `bitrate` with `exclude` omitted"
                 )
             }
         }

@@ -10,7 +10,9 @@ use std::path::PathBuf;
 
 use scarab::InvalidLibraryBuildSpec;
 
-use super::{collection_config, invalid, prefixed, rejects_toml, valid};
+use super::{
+    assert_error_message_contains, collection_config, invalid, prefixed, rejects_toml, valid,
+};
 
 #[test]
 fn parses_collection_rule_with_one_collection() {
@@ -126,4 +128,32 @@ fn collection_rule_can_reference_directory_only_collection() {
     assert_eq!(rules.len(), 1);
     assert_eq!(rules[0].collection_handles, ["fs_only"]);
     assert_eq!(rules[0].bitrate, 96);
+}
+
+#[test]
+fn display_unknown_collection_handle_names_category_and_handle() {
+    assert_error_message_contains(
+        InvalidLibraryBuildSpec::UnknownCollectionHandle {
+            collection_handle: "nonesuch".into(),
+        },
+        &["undeclared collection handle", "`nonesuch`"],
+    );
+}
+
+#[test]
+fn display_empty_collection_rule_targets_names_collections_and_requirement() {
+    assert_error_message_contains(
+        InvalidLibraryBuildSpec::EmptyCollectionRuleTargets,
+        &["`collections`", "at least one"],
+    );
+}
+
+#[test]
+fn display_duplicate_collection_rule_names_handle_and_repeated_targeting() {
+    assert_error_message_contains(
+        InvalidLibraryBuildSpec::DuplicateCollectionRule {
+            collection_handle: "lateralus".into(),
+        },
+        &["`lateralus`", "more than once", "`collection_rules`"],
+    );
 }

@@ -9,7 +9,7 @@
 
 use scarab::{InvalidLibraryBuildSpec, TrackAction, TrackTarget};
 
-use super::{invalid, prefixed, valid};
+use super::{assert_error_message_contains, invalid, prefixed, valid};
 
 fn track_rule(entry: &str) -> String {
     prefixed(&format!(
@@ -164,4 +164,64 @@ fn inline_and_nested_track_rules_deserialize_identically() {
     );
 
     assert_eq!(valid(&inline), valid(&nested));
+}
+
+#[test]
+fn display_duplicate_track_rule_attributes_distinct_track_and_collection() {
+    assert_error_message_contains(
+        InvalidLibraryBuildSpec::DuplicateTrackRule {
+            collection_handle: "lateralus".into(),
+            track_name: "Reflection".into(),
+        },
+        &[
+            "track `Reflection`",
+            "collection `lateralus`",
+            "more than one rule",
+        ],
+    );
+}
+
+#[test]
+fn display_empty_track_rule_group_names_collection_and_nested_rules() {
+    assert_error_message_contains(
+        InvalidLibraryBuildSpec::EmptyTrackRules {
+            collection_handle: "undertow".into(),
+        },
+        &["`undertow`", "no nested `rules`"],
+    );
+}
+
+#[test]
+fn display_invalid_track_target_names_track_keys_and_exclusivity() {
+    assert_error_message_contains(
+        InvalidLibraryBuildSpec::TrackTargetNotExclusive {
+            collection_handle: "aenima".into(),
+        },
+        &["`aenima`", "`track`", "`tracks`", "exactly one"],
+    );
+}
+
+#[test]
+fn display_empty_tracks_names_tracks_key_and_empty_list() {
+    assert_error_message_contains(
+        InvalidLibraryBuildSpec::EmptyTracks {
+            collection_handle: "salival".into(),
+        },
+        &["`salival`", "has an empty `tracks` list"],
+    );
+}
+
+#[test]
+fn display_invalid_track_action_guides_both_valid_patterns() {
+    assert_error_message_contains(
+        InvalidLibraryBuildSpec::TrackActionNotExclusive {
+            collection_handle: "opiate".into(),
+        },
+        &[
+            "`opiate`",
+            "`exclude = true`",
+            "`bitrate` omitted",
+            "`exclude` omitted",
+        ],
+    );
 }
